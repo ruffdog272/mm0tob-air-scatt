@@ -6,8 +6,11 @@ import {
   bearing,
   crossTrackKm,
   distanceKm,
+  elevationAngleDeg,
   localENU,
 } from "./geo"
+
+export const FT_TO_M = 0.3048
 
 export const FL_FLOOR_FT = 20000 // FL200 hard floor
 export const FL_GREEN_FT = 25000 // FL250
@@ -40,14 +43,20 @@ export interface AnalyzedAircraft {
   callsign: string
   pos: LatLon
   altFt: number
+  /** altitude in meters above sea level */
+  altM: number
   groundSpeedKt: number
   track: number
   /** signed cross-track distance to the signal path (km) */
   crossTrackKm: number
-  /** bearing from home station to aircraft (deg) */
+  /** bearing from home station to aircraft (deg) — antenna azimuth */
   bearingFromHome: number
   /** distance from home station (km) */
   rangeFromHomeKm: number
+  /** elevation / take-off angle from home station to aircraft (deg) */
+  elevationDeg: number
+  /** true when the aircraft is closing toward the signal path */
+  approaching: boolean
   probability: Probability
   /** Doppler shift in Hz keyed by band */
   doppler: Record<string, number>
@@ -107,11 +116,14 @@ export function analyzeAircraft(
   }
 
   // Numeric estimate of path-crossing time via cross-track rate.
+  // `approaching` is true when the absolute cross-track distance is shrinking.
   let etaSeconds: number | null = null
+  let approaching = false
   if (speedKmS > 0) {
     const dt = 1 // second
     const next = offset(pos, vEast * dt, vNorth * dt)
     const ctNext = crossTrackKm(next, home, dx)
+    approaching = Math.abs(ctNext) < Math.abs(ct)
     const rate = (ctNext - ct) / dt // km/s
     if (Math.abs(rate) > 1e-6) {
       const t = -ct / rate
@@ -119,16 +131,21 @@ export function analyzeAircraft(
     }
   }
 
+  const rangeFromHomeKm = distanceKm(home, pos)
+
   return {
     hex: raw.hex,
     callsign: (raw.flight || raw.hex).trim(),
     pos,
     altFt,
+    altM: altFt * FT_TO_M,
     groundSpeedKt: gs,
     track,
     crossTrackKm: ct,
     bearingFromHome: bearing(home, pos),
-    rangeFromHomeKm: distanceKm(home, pos),
+    rangeFromHomeKm,
+    elevationDeg: elevationAngleDeg(rangeFromHomeKm, (altFt * FT_TO_M) / 1000),
+    approaching,
     probability: classify(altFt, absCt),
     doppler,
     etaSeconds,
@@ -149,6 +166,8 @@ export function analyzeFeed(
       return alt >= FL_FLOOR_FT
     })
     .map((a) => analyzeAircraft(a, home, dx))
+    // Only keep aircraft actively closing the distance to the signal path.
+    .filter((a) => a.approaching)
     .sort((x, y) => {
       const order = { high: 0, marginal: 1, unlikely: 2 }
       if (order[x.probability] !== order[y.probability])

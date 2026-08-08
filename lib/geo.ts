@@ -98,6 +98,21 @@ export function greatCirclePoints(
 }
 
 /**
+ * Take-off / elevation angle (degrees above the horizon) from a ground
+ * station to a target at altitude `altKm`, given great-circle ground
+ * distance `groundKm`. Accounts for Earth curvature. Clamped to >= 0.
+ */
+export function elevationAngleDeg(groundKm: number, altKm: number): number {
+  const R = EARTH_RADIUS_KM
+  const d = groundKm / R // central angle (rad)
+  const num = Math.cos(d) - R / (R + altKm)
+  const den = Math.sin(d)
+  if (den <= 1e-9) return 90
+  const el = toDeg(Math.atan2(num, den))
+  return Math.max(0, el)
+}
+
+/**
  * Local East/North unit-ish displacement in km from origin to point,
  * using an equirectangular approximation (good for short ranges).
  */

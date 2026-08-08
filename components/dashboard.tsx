@@ -53,7 +53,19 @@ export function Dashboard() {
   const [myGrid, setMyGrid] = useState("FN31PR")
   const [dxGrid, setDxGrid] = useState("FM19LW")
   const [band, setBand] = useState("2m")
+  const [callsign, setCallsign] = useState("")
   const [now, setNow] = useState(() => Date.now())
+
+  // Load saved operator callsign from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem("operatorCallsign")
+    if (saved) setCallsign(saved)
+  }, [])
+
+  // Persist callsign whenever it changes
+  useEffect(() => {
+    localStorage.setItem("operatorCallsign", callsign)
+  }, [callsign])
 
   // 1 Hz tick for ETA countdowns
   useEffect(() => {
@@ -147,12 +159,14 @@ export function Dashboard() {
       {/* Grid inputs */}
       <div className="rounded-lg border border-border bg-card p-4">
         <StationControls
+          callsign={callsign}
           myGrid={myGrid}
           dxGrid={dxGrid}
           myCoords={myCoords}
           dxCoords={dxCoords}
           myValid={myValid}
           dxValid={dxValid}
+          onCallsignChange={setCallsign}
           onMyChange={setMyGrid}
           onDxChange={setDxGrid}
         />
@@ -191,13 +205,13 @@ export function Dashboard() {
               <li className="flex items-start gap-2.5">
                 <span className="mt-0.5 h-3 w-3 shrink-0 rounded-full bg-prob-high" />
                 <span className="text-muted-foreground">
-                  <span className="text-foreground">High</span> — FL250+ and within 5 km of path
+                  <span className="text-foreground">High</span> — 25,000 ft+ and within 5 km of path
                 </span>
               </li>
               <li className="flex items-start gap-2.5">
                 <span className="mt-0.5 h-3 w-3 shrink-0 rounded-full bg-prob-marginal" />
                 <span className="text-muted-foreground">
-                  <span className="text-foreground">Marginal</span> — FL200–250 or 5–15 km off path
+                  <span className="text-foreground">Marginal</span> — 20–25,000 ft or 5–15 km off path
                 </span>
               </li>
               <li className="flex items-start gap-2.5">
@@ -209,8 +223,8 @@ export function Dashboard() {
             </ul>
             <p className="mt-4 border-t border-border/60 pt-3 font-mono text-[10px] leading-relaxed text-muted-foreground/80">
               Search box: 250 NM ({(250 * KM_PER_NM).toFixed(0)} km) radius around the
-              path midpoint. Doppler shown for the selected band on the reflected
-              two-hop path.
+              path midpoint. Only aircraft above 20,000 ft and actively closing on
+              the path are shown. Tap a row for azimuth, elevation, and Doppler.
             </p>
           </section>
         </aside>
