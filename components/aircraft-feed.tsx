@@ -50,6 +50,13 @@ function compassPoint(deg: number): string {
   return COMPASS_POINTS[idx]
 }
 
+function fmtTrajectory(a: AnalyzedAircraft): string {
+  if (a.willIntersect) return "Will cross path segment"
+  if (a.minTrajectoryDistKm <= 10)
+    return `Passes ${a.minTrajectoryDistKm.toFixed(1)} km from path`
+  return "Misses station-to-station window"
+}
+
 function fmtAlt(altFt: number, altM: number): string {
   return `${Math.round(altFt).toLocaleString("en-US")} ft / ${Math.round(
     altM,
@@ -136,8 +143,7 @@ function AircraftRow({
             <span>{fmtAlt(a.altFt, a.altM)}</span>
             <span>el {a.elevationDeg.toFixed(1)}°</span>
             <span style={{ color: meta.color }}>
-              {a.crossTrackKm >= 0 ? "+" : "\u2212"}
-              {Math.abs(a.crossTrackKm).toFixed(1)} km
+              {a.willIntersect ? "crosses" : `${a.distToSegmentKm.toFixed(1)} km off`}
             </span>
           </div>
         </div>
@@ -146,9 +152,18 @@ function AircraftRow({
           <span className="font-mono text-sm tabular-nums text-foreground">
             {fmtDoppler(a.doppler[band])}
           </span>
-          <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-            ETA {fmtEta(remainingEta)}
-          </span>
+          {a.willIntersect ? (
+            <span
+              className="font-mono text-[10px] font-semibold uppercase tracking-wider"
+              style={{ color: meta.color }}
+            >
+              ETA {fmtEta(remainingEta)}
+            </span>
+          ) : (
+            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              no cross
+            </span>
+          )}
         </div>
       </button>
     </li>
@@ -282,9 +297,25 @@ function AircraftDetail({
             value={`${a.headingDeg.toFixed(1)}° (${compassPoint(a.headingDeg)})`}
           />
           <DetailRow
-            label="Antenna Azimuth"
+            label="Trajectory"
+            value={fmtTrajectory(a)}
+            color={meta.color}
+          />
+          <DetailRow
+            label="Dist. to path window"
+            value={`${a.distToSegmentKm.toFixed(2)} km`}
+          />
+          {a.crossingPoint && (
+            <DetailRow
+              label="Predicted crossing"
+              value={`${a.crossingPoint.lat.toFixed(3)}, ${a.crossingPoint.lon.toFixed(3)}`}
+            />
+          )}
+          <DetailRow
+            label="HOME azimuth"
             value={`${a.bearingFromHome.toFixed(1)}°`}
           />
+          <DetailRow label="DX azimuth" value={`${a.bearingFromDx.toFixed(1)}°`} />
           <DetailRow
             label="Elevation Angle"
             value={`${a.elevationDeg.toFixed(2)}° above horizon`}
@@ -292,13 +323,6 @@ function AircraftDetail({
           <DetailRow
             label="Range from station"
             value={`${a.rangeFromHomeKm.toFixed(1)} km`}
-          />
-          <DetailRow
-            label="Cross-track offset"
-            value={`${a.crossTrackKm >= 0 ? "+" : "\u2212"}${Math.abs(
-              a.crossTrackKm,
-            ).toFixed(2)} km`}
-            color={meta.color}
           />
           <DetailRow
             label="Reported track (ADS-B)"
@@ -312,8 +336,9 @@ function AircraftDetail({
           <div className="mt-3 flex items-center gap-2 rounded-md bg-secondary/40 px-3 py-2 text-[11px] text-muted-foreground">
             <Radio className="h-3.5 w-3.5 shrink-0 text-primary" />
             <span>
-              Point beam to {Math.round(a.bearingFromHome)}° azimuth,{" "}
-              {a.elevationDeg.toFixed(1)}° elevation for this reflection.
+              Pre-aim HOME to {Math.round(a.bearingFromHome)}° / DX to{" "}
+              {Math.round(a.bearingFromDx)}° azimuth, {a.elevationDeg.toFixed(1)}°
+              elevation to track this aircraft.
             </span>
           </div>
         </div>

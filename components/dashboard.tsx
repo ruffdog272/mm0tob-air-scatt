@@ -205,26 +205,27 @@ export function Dashboard() {
               <li className="flex items-start gap-2.5">
                 <span className="mt-0.5 h-3 w-3 shrink-0 rounded-full bg-prob-high" />
                 <span className="text-muted-foreground">
-                  <span className="text-foreground">High</span> — 25,000 ft+ and within 5 km of path
+                  <span className="text-foreground">High</span> — trajectory will cross the path segment and 25,000 ft+
                 </span>
               </li>
               <li className="flex items-start gap-2.5">
                 <span className="mt-0.5 h-3 w-3 shrink-0 rounded-full bg-prob-marginal" />
                 <span className="text-muted-foreground">
-                  <span className="text-foreground">Marginal</span> — 20–25,000 ft or 5–15 km off path
+                  <span className="text-foreground">Marginal</span> — passes within 10 km of the segment, or 20–25,000 ft
                 </span>
               </li>
               <li className="flex items-start gap-2.5">
                 <span className="mt-0.5 h-3 w-3 shrink-0 rounded-full bg-prob-unlikely" />
                 <span className="text-muted-foreground">
-                  <span className="text-foreground">Unlikely</span> — lower or 15 km+ off path
+                  <span className="text-foreground">Unlikely</span> — flight path misses the station-to-station window
                 </span>
               </li>
             </ul>
             <p className="mt-4 border-t border-border/60 pt-3 font-mono text-[10px] leading-relaxed text-muted-foreground/80">
-              Search box: 250 NM ({(250 * KM_PER_NM).toFixed(0)} km) radius around the
-              path midpoint. Only aircraft above 20,000 ft and actively closing on
-              the path are shown. Tap a row for azimuth, elevation, and Doppler.
+              Search box: 250 NM ({(250 * KM_PER_NM).toFixed(0)} km) around the path
+              midpoint. Trajectories are projected 15 min ahead against the bounded
+              HOME↔DX segment. Tap a row for crossing point, dual-station azimuth,
+              and Doppler.
             </p>
           </section>
         </aside>

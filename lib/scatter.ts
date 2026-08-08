@@ -18,6 +18,11 @@ export const FL_GREEN_FT = 25000 // FL250
 export const SPEED_OF_LIGHT_KM_S = 299792.458
 export const KNOTS_TO_KM_S = 1.852 / 3600
 
+/** Predictive look-ahead window for trajectory intersection (seconds). */
+export const PREDICT_HORIZON_S = 15 * 60
+/** Marginal (yellow) corridor half-width around the path segment (km). */
+export const MARGINAL_CORRIDOR_KM = 10
+
 export type Probability = "high" | "marginal" | "unlikely"
 
 /** Ham bands we compute Doppler corrections for. */
@@ -49,20 +54,30 @@ export interface AnalyzedAircraft {
   track: number
   /** absolute flight heading from the movement vector, 0-360 (0=N, 90=E) */
   headingDeg: number
-  /** signed cross-track distance to the signal path (km) */
+  /** signed cross-track distance to the infinite great-circle line (km) */
   crossTrackKm: number
+  /** current perpendicular distance to the BOUNDED path segment (km) */
+  distToSegmentKm: number
+  /** closest the projected trajectory comes to the segment within horizon (km) */
+  minTrajectoryDistKm: number
+  /** true when the forward trajectory will cross the segment within the horizon */
+  willIntersect: boolean
+  /** predicted lat/lon where the trajectory crosses the path segment, if any */
+  crossingPoint: LatLon | null
   /** bearing from home station to aircraft (deg) — antenna azimuth */
   bearingFromHome: number
+  /** bearing from DX station to aircraft (deg) — DX antenna azimuth */
+  bearingFromDx: number
   /** distance from home station (km) */
   rangeFromHomeKm: number
   /** elevation / take-off angle from home station to aircraft (deg) */
   elevationDeg: number
-  /** true when the aircraft is closing toward the signal path */
+  /** true when the aircraft is closing on the bounded path segment */
   approaching: boolean
   probability: Probability
   /** Doppler shift in Hz keyed by band */
   doppler: Record<string, number>
-  /** seconds until the aircraft crosses the signal path, or null if diverging */
+  /** seconds until the aircraft crosses the path segment, or null if it won't */
   etaSeconds: number | null
 }
 
@@ -75,10 +90,23 @@ function offset(p: LatLon, eastKm: number, northKm: number): LatLon {
   return { lat, lon }
 }
 
-function classify(altFt: number, absCross: number): Probability {
-  if (absCross > 15) return "unlikely"
-  if (altFt >= FL_GREEN_FT && absCross <= 5) return "high"
-  return "marginal"
+/**
+ * Trajectory-aware classification.
+ * - HIGH  (green):  projected trajectory WILL cross the bounded path segment
+ *                   within the horizon AND altitude >= FL250.
+ * - MARG  (yellow): trajectory passes within the marginal corridor of the
+ *                   segment, OR altitude is FL200–FL250.
+ * - LOW   (red):    trajectory misses the station-to-station window entirely.
+ */
+function classify(
+  altFt: number,
+  willIntersect: boolean,
+  minTrajectoryDistKm: number,
+): Probability {
+  if (willIntersect && altFt >= FL_GREEN_FT) return "high"
+  if (minTrajectoryDistKm <= MARGINAL_CORRIDOR_KM) return "marginal"
+  if (altFt >= FL_FLOOR_FT && altFt < FL_GREEN_FT) return "marginal"
+  return "unlikely"
 }
 
 /**
@@ -94,8 +122,9 @@ export function analyzeAircraft(
   const gs = raw.gs ?? 0
   const track = raw.track ?? 0
 
+  // Signed cross-track vs the INFINITE great-circle line (kept for the Doppler
+  // geometry sign and as a display reference).
   const ct = crossTrackKm(pos, home, dx)
-  const absCt = Math.abs(ct)
 
   // Velocity vector in local ENU (km/s) centered on the aircraft.
   const speedKmS = gs * KNOTS_TO_KM_S
@@ -109,6 +138,61 @@ export function analyzeAircraft(
     speedKmS > 1e-6
       ? ((Math.atan2(vEast, vNorth) * 180) / Math.PI + 360) % 360
       : ((track % 360) + 360) % 360
+
+  // --- Bounded segment + predictive trajectory model (planar ENU @ home) ---
+  // The radio path is a STRICT SEGMENT between HOME and DX, never extended to
+  // infinity. All prediction happens in a local East/North plane centered on
+  // the home station, which is accurate over these ranges.
+  const dEnu = localENU(home, dx)
+  const pEnu = localENU(home, pos)
+  const segLen = Math.hypot(dEnu.east, dEnu.north) || 1
+  const dHatE = dEnu.east / segLen
+  const dHatN = dEnu.north / segLen
+  const nHatE = -dHatN // left-hand normal to the segment
+  const nHatN = dHatE
+
+  // Clamped point-to-SEGMENT distance (endpoints bound the window).
+  const segDist = (e: number, n: number): number => {
+    let s = e * dHatE + n * dHatN
+    if (s < 0) s = 0
+    else if (s > segLen) s = segLen
+    return Math.hypot(e - s * dHatE, n - s * dHatN)
+  }
+
+  const distToSegmentKm = segDist(pEnu.east, pEnu.north)
+
+  // Project the trajectory forward and solve for the moment it crosses the
+  // segment's line; only counts if the crossing lands BETWEEN the stations and
+  // inside the look-ahead horizon.
+  const crossSigned = pEnu.east * nHatE + pEnu.north * nHatN
+  const vPerp = vEast * nHatE + vNorth * nHatN
+  let etaSeconds: number | null = null
+  let willIntersect = false
+  let crossingPoint: LatLon | null = null
+  if (Math.abs(vPerp) > 1e-9) {
+    const tCross = -crossSigned / vPerp
+    if (tCross >= 0 && tCross <= PREDICT_HORIZON_S) {
+      const cxE = pEnu.east + vEast * tCross
+      const cxN = pEnu.north + vNorth * tCross
+      const sCross = cxE * dHatE + cxN * dHatN
+      if (sCross >= 0 && sCross <= segLen) {
+        willIntersect = true
+        etaSeconds = tCross
+        crossingPoint = offset(home, cxE, cxN)
+      }
+    }
+  }
+
+  // Closest the projected path comes to the segment over the horizon.
+  let minTrajectoryDistKm = distToSegmentKm
+  const STEP_S = 15
+  for (let t = STEP_S; t <= PREDICT_HORIZON_S; t += STEP_S) {
+    const d = segDist(pEnu.east + vEast * t, pEnu.north + vNorth * t)
+    if (d < minTrajectoryDistKm) minTrajectoryDistKm = d
+  }
+
+  // Approaching = distance to the bounded segment is currently decreasing.
+  const approaching = segDist(pEnu.east + vEast, pEnu.north + vNorth) < distToSegmentKm
 
   // Unit vectors from aircraft toward each station.
   const homeENU = localENU(pos, home)
@@ -125,22 +209,6 @@ export function analyzeAircraft(
     doppler[band.key] = -(band.freqHz / SPEED_OF_LIGHT_KM_S) * dRdt
   }
 
-  // Numeric estimate of path-crossing time via cross-track rate.
-  // `approaching` is true when the absolute cross-track distance is shrinking.
-  let etaSeconds: number | null = null
-  let approaching = false
-  if (speedKmS > 0) {
-    const dt = 1 // second
-    const next = offset(pos, vEast * dt, vNorth * dt)
-    const ctNext = crossTrackKm(next, home, dx)
-    approaching = Math.abs(ctNext) < Math.abs(ct)
-    const rate = (ctNext - ct) / dt // km/s
-    if (Math.abs(rate) > 1e-6) {
-      const t = -ct / rate
-      if (t > 0 && t < 3600) etaSeconds = t
-    }
-  }
-
   const rangeFromHomeKm = distanceKm(home, pos)
 
   return {
@@ -153,11 +221,16 @@ export function analyzeAircraft(
     track,
     headingDeg,
     crossTrackKm: ct,
+    distToSegmentKm,
+    minTrajectoryDistKm,
+    willIntersect,
+    crossingPoint,
     bearingFromHome: bearing(home, pos),
+    bearingFromDx: bearing(dx, pos),
     rangeFromHomeKm,
     elevationDeg: elevationAngleDeg(rangeFromHomeKm, (altFt * FT_TO_M) / 1000),
     approaching,
-    probability: classify(altFt, absCt),
+    probability: classify(altFt, willIntersect, minTrajectoryDistKm),
     doppler,
     etaSeconds,
   }
@@ -177,12 +250,15 @@ export function analyzeFeed(
       return alt >= FL_FLOOR_FT
     })
     .map((a) => analyzeAircraft(a, home, dx))
-    // Only keep aircraft actively closing the distance to the signal path.
+    // Only keep aircraft actively closing on the bounded path segment.
     .filter((a) => a.approaching)
     .sort((x, y) => {
       const order = { high: 0, marginal: 1, unlikely: 2 }
       if (order[x.probability] !== order[y.probability])
         return order[x.probability] - order[y.probability]
-      return Math.abs(x.crossTrackKm) - Math.abs(y.crossTrackKm)
+      // Within a tier, aircraft that will intersect soonest rank first.
+      if (x.willIntersect && y.willIntersect)
+        return (x.etaSeconds ?? Infinity) - (y.etaSeconds ?? Infinity)
+      return x.distToSegmentKm - y.distToSegmentKm
     })
 }

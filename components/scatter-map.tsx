@@ -3,6 +3,7 @@
 import { useEffect, useMemo } from "react"
 import {
   Circle,
+  CircleMarker,
   MapContainer,
   Marker,
   Polyline,
@@ -106,6 +107,27 @@ export default function ScatterMap({
       <Marker position={[home.lat, home.lon]} icon={stationIcon("HOME", "oklch(0.74 0.13 214)")} />
       <Marker position={[dx.lat, dx.lon]} icon={stationIcon("DX", "oklch(0.6 0.12 300)")} />
 
+      {/* Predicted crossing points for aircraft whose trajectory will
+          intersect the bounded path segment. */}
+      {aircraft
+        .filter((a) => a.crossingPoint)
+        .map((a) => (
+          <CircleMarker
+            key={`x-${a.hex}`}
+            center={[a.crossingPoint!.lat, a.crossingPoint!.lon]}
+            radius={4}
+            pathOptions={{
+              color: PROB_VAR[a.probability],
+              weight: 2,
+              fillOpacity: 0.9,
+            }}
+          >
+            <Tooltip direction="top" offset={[0, -4]} opacity={1}>
+              <span className="font-mono text-xs">{a.callsign} crossing</span>
+            </Tooltip>
+          </CircleMarker>
+        ))}
+
       {aircraft.map((a) => (
         <Marker
           key={a.hex}
@@ -114,7 +136,8 @@ export default function ScatterMap({
         >
           <Tooltip direction="top" offset={[0, -8]} opacity={1}>
             <span className="font-mono text-xs">
-              {a.callsign} · FL{Math.round(a.altFt / 100)} · {Math.round(a.crossTrackKm)} km
+              {a.callsign} · {Math.round(a.altFt).toLocaleString("en-US")} ft ·{" "}
+              {a.willIntersect ? "crosses" : `${a.distToSegmentKm.toFixed(0)} km off`}
             </span>
           </Tooltip>
         </Marker>
