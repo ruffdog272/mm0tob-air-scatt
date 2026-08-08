@@ -9,6 +9,11 @@ function GridField({
   coords,
   valid,
   onChange,
+  antennaLabel,
+  antennaHeight,
+  onAntennaChange,
+  groundElev,
+  antennaAsl,
 }: {
   label: string
   accent: string
@@ -16,6 +21,11 @@ function GridField({
   coords: LatLon | null
   valid: boolean
   onChange: (v: string) => void
+  antennaLabel: string
+  antennaHeight: number
+  onAntennaChange: (v: number) => void
+  groundElev: number | null
+  antennaAsl: number | null
 }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -37,6 +47,32 @@ function GridField({
           ? `${coords.lat.toFixed(4)}, ${coords.lon.toFixed(4)}`
           : "invalid locator"}
       </p>
+
+      {/* Antenna height above ground level */}
+      <div className="mt-1 flex items-center gap-2">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground/80 whitespace-nowrap">
+          {antennaLabel}
+        </span>
+        <div className="relative flex-1">
+          <input
+            type="number"
+            min={0}
+            max={500}
+            step={1}
+            value={Number.isFinite(antennaHeight) ? antennaHeight : 0}
+            onChange={(e) => onAntennaChange(Number.parseFloat(e.target.value) || 0)}
+            className="w-full rounded-md border border-input bg-secondary/60 px-2 py-1 pr-10 font-mono text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/40"
+          />
+          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[10px] text-muted-foreground">
+            m AGL
+          </span>
+        </div>
+      </div>
+      <p className="font-mono text-[10px] text-muted-foreground/80">
+        {groundElev != null && antennaAsl != null
+          ? `ground ${groundElev.toFixed(0)} m + ant = ${antennaAsl.toFixed(0)} m ASL`
+          : "ground elevation pending"}
+      </p>
     </div>
   )
 }
@@ -49,9 +85,15 @@ export function StationControls({
   dxCoords,
   myValid,
   dxValid,
+  myAntM,
+  dxAntM,
+  myGround,
+  dxGround,
   onCallsignChange,
   onMyChange,
   onDxChange,
+  onMyAntChange,
+  onDxAntChange,
 }: {
   callsign: string
   myGrid: string
@@ -60,9 +102,15 @@ export function StationControls({
   dxCoords: LatLon | null
   myValid: boolean
   dxValid: boolean
+  myAntM: number
+  dxAntM: number
+  myGround: number | null
+  dxGround: number | null
   onCallsignChange: (v: string) => void
   onMyChange: (v: string) => void
   onDxChange: (v: string) => void
+  onMyAntChange: (v: number) => void
+  onDxAntChange: (v: number) => void
 }) {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -90,6 +138,11 @@ export function StationControls({
         coords={myCoords}
         valid={myValid}
         onChange={onMyChange}
+        antennaLabel="My Antenna"
+        antennaHeight={myAntM}
+        onAntennaChange={onMyAntChange}
+        groundElev={myGround}
+        antennaAsl={myGround != null ? myGround + myAntM : null}
       />
       <GridField
         label="DX Grid"
@@ -98,6 +151,11 @@ export function StationControls({
         coords={dxCoords}
         valid={dxValid}
         onChange={onDxChange}
+        antennaLabel="DX Antenna"
+        antennaHeight={dxAntM}
+        onAntennaChange={onDxAntChange}
+        groundElev={dxGround}
+        antennaAsl={dxGround != null ? dxGround + dxAntM : null}
       />
     </div>
   )

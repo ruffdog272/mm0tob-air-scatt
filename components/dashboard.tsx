@@ -8,9 +8,11 @@ import { Plane, Radio, Route } from "lucide-react"
 import { gridToLatLon, isValidLocator } from "@/lib/maidenhead"
 import { bearing, distanceKm, KM_PER_NM } from "@/lib/geo"
 import { analyzeFeed, type RawAircraft } from "@/lib/scatter"
+import { analyzeClearance, type TerrainProfile } from "@/lib/terrain"
 import { StationControls } from "@/components/station-controls"
 import { AircraftFeed } from "@/components/aircraft-feed"
 import { SpaceWeather } from "@/components/space-weather"
+import { TerrainProfileChart } from "@/components/terrain-profile"
 
 const ScatterMap = dynamic(() => import("@/components/scatter-map"), {
   ssr: false,
@@ -54,18 +56,30 @@ export function Dashboard() {
   const [dxGrid, setDxGrid] = useState("FM19LW")
   const [band, setBand] = useState("2m")
   const [callsign, setCallsign] = useState("")
+  const [myAntM, setMyAntM] = useState(10)
+  const [dxAntM, setDxAntM] = useState(10)
   const [now, setNow] = useState(() => Date.now())
 
-  // Load saved operator callsign from localStorage on mount
+  // Load saved operator settings from localStorage on mount
   useEffect(() => {
     const saved = localStorage.getItem("operatorCallsign")
     if (saved) setCallsign(saved)
+    const my = localStorage.getItem("myAntennaM")
+    if (my != null && Number.isFinite(Number.parseFloat(my))) setMyAntM(Number.parseFloat(my))
+    const dx = localStorage.getItem("dxAntennaM")
+    if (dx != null && Number.isFinite(Number.parseFloat(dx))) setDxAntM(Number.parseFloat(dx))
   }, [])
 
-  // Persist callsign whenever it changes
+  // Persist callsign + antenna heights whenever they change
   useEffect(() => {
     localStorage.setItem("operatorCallsign", callsign)
   }, [callsign])
+  useEffect(() => {
+    localStorage.setItem("myAntennaM", String(myAntM))
+  }, [myAntM])
+  useEffect(() => {
+    localStorage.setItem("dxAntennaM", String(dxAntM))
+  }, [dxAntM])
 
   // 1 Hz tick for ETA countdowns
   useEffect(() => {
@@ -108,6 +122,29 @@ export function Dashboard() {
     if (!data?.ac || !myCoords || !dxCoords) return []
     return analyzeFeed(data.ac, myCoords, dxCoords)
   }, [data, myCoords, dxCoords])
+
+  // Terrain elevation profile between the two stations (cached; only refetches
+  // when the coordinates change, not on antenna-height edits).
+  const terrainKey =
+    bothValid && myCoords && dxCoords
+      ? `/api/terrain?mlat=${myCoords.lat.toFixed(4)}&mlon=${myCoords.lon.toFixed(
+          4,
+        )}&dlat=${dxCoords.lat.toFixed(4)}&dlon=${dxCoords.lon.toFixed(4)}`
+      : null
+
+  const { data: terrain, error: terrainError } = useSWR<TerrainProfile>(
+    terrainKey,
+    fetcher,
+    { revalidateOnFocus: false, keepPreviousData: false },
+  )
+
+  const clearance = useMemo(() => {
+    if (!terrain?.elevations?.length) return null
+    return analyzeClearance(terrain, myAntM, dxAntM)
+  }, [terrain, myAntM, dxAntM])
+
+  const myGround = terrain?.elevations?.[0] ?? null
+  const dxGround = terrain?.elevations?.[terrain.elevations.length - 1] ?? null
 
   const pathDistance = myCoords && dxCoords ? distanceKm(myCoords, dxCoords) : 0
   const pathBearing = myCoords && dxCoords ? bearing(myCoords, dxCoords) : 0
@@ -166,9 +203,15 @@ export function Dashboard() {
           dxCoords={dxCoords}
           myValid={myValid}
           dxValid={dxValid}
+          myAntM={myAntM}
+          dxAntM={dxAntM}
+          myGround={myGround}
+          dxGround={dxGround}
           onCallsignChange={setCallsign}
           onMyChange={setMyGrid}
           onDxChange={setDxGrid}
+          onMyAntChange={setMyAntM}
+          onDxAntChange={setDxAntM}
         />
       </div>
 
@@ -184,6 +227,15 @@ export function Dashboard() {
               </div>
             )}
           </div>
+
+          {bothValid && (
+            <TerrainProfileChart
+              profile={terrain ?? null}
+              clearance={clearance}
+              loading={!terrain && !terrainError}
+              error={Boolean(terrainError)}
+            />
+          )}
 
           <AircraftFeed
             aircraft={aircraft}
@@ -201,6 +253,19 @@ export function Dashboard() {
 
           <section className="rounded-lg border border-border bg-card p-4">
             <h2 className="mb-3 text-sm font-semibold tracking-tight">Probability Key</h2>
+            {clearance?.obstructed && (
+              <div
+                role="alert"
+                className="mb-3 rounded-md border border-destructive/50 bg-destructive/15 px-3 py-2 text-[11px] leading-tight"
+              >
+                <p className="font-semibold text-destructive">Obstructed Path</p>
+                <p className="mt-0.5 text-muted-foreground">
+                  High take-off angle required (≥{" "}
+                  {clearance.requiredTakeoffDeg.toFixed(1)}°). Terrain blocks direct
+                  line of sight.
+                </p>
+              </div>
+            )}
             <ul className="flex flex-col gap-2.5 text-xs">
               <li className="flex items-start gap-2.5">
                 <span className="mt-0.5 h-3 w-3 shrink-0 rounded-full bg-prob-high" />
