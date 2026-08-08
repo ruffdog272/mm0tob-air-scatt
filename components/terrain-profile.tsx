@@ -93,15 +93,27 @@ export function TerrainProfileChart({
     const groundLine =
       "M " + elevations.map((e, i) => `${x(distances[i])},${y(e)}`).join(" L ")
 
-    // Common-volume inverted triangle: HOME -> apex -> DX.
-    const trianglePath =
-      `M ${x(0)},${y(clearance.homeAsl)} ` +
-      `L ${x(apexKm)},${y(apexM)} ` +
-      `L ${x(totalKm)},${y(clearance.dxAsl)}`
+    // Where each take-off beam, continued UPWARD past the apex, reaches the top
+    // of the chart. The HOME beam climbs to the right; the DX beam climbs to the
+    // left. (Off-plot values are trimmed by the clip path.)
+    const homeTopKm =
+      tanH > 1e-6 ? (yMax - clearance.homeAsl) / (tanH * 1000) : totalKm * 20
+    const dxTopKm =
+      tanD > 1e-6
+        ? totalKm - (yMax - clearance.dxAsl) / (tanD * 1000)
+        : -totalKm * 20
 
-    // Take-off beam rays (the two sides of the triangle up to the apex).
-    const homeBeam = `M ${x(0)},${y(clearance.homeAsl)} L ${x(apexKm)},${y(apexM)}`
-    const dxBeam = `M ${x(totalKm)},${y(clearance.dxAsl)} L ${x(apexKm)},${y(apexM)}`
+    // Common-volume OPEN FUNNEL: shade the sky ABOVE the beam crossover. Point
+    // at the apex, widening upward to the chart ceiling between the two beams.
+    const trianglePath =
+      `M ${x(apexKm)},${y(apexM)} ` +
+      `L ${x(homeTopKm)},${y(yMax)} ` +
+      `L ${x(dxTopKm)},${y(yMax)} Z`
+
+    // Take-off beam rays drawn full-length: from each antenna up over its local
+    // hill, through the apex, and on to the top of the chart (funnel edges).
+    const homeBeam = `M ${x(0)},${y(clearance.homeAsl)} L ${x(homeTopKm)},${y(yMax)}`
+    const dxBeam = `M ${x(totalKm)},${y(clearance.dxAsl)} L ${x(dxTopKm)},${y(yMax)}`
 
     // Plotted aircraft: X = along-track distance from HOME, Y = altitude ASL.
     const planes = aircraft.map((a) => ({
