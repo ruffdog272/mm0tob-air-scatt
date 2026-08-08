@@ -13,6 +13,9 @@ function GridField({
   antennaHeight,
   onAntennaChange,
   groundElev,
+  fetchedGround,
+  overridden,
+  onGroundChange,
   antennaAsl,
 }: {
   label: string
@@ -25,6 +28,9 @@ function GridField({
   antennaHeight: number
   onAntennaChange: (v: number) => void
   groundElev: number | null
+  fetchedGround: number | null
+  overridden: boolean
+  onGroundChange: (v: number | null) => void
   antennaAsl: number | null
 }) {
   return (
@@ -48,9 +54,30 @@ function GridField({
           : "invalid locator"}
       </p>
 
-      {/* Antenna height above ground level */}
+      {/* Ground elevation (editable) + antenna height above ground level */}
       <div className="mt-1 flex items-center gap-2">
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground/80 whitespace-nowrap">
+        <span className="w-14 shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground/80">
+          Ground
+        </span>
+        <div className="relative flex-1">
+          <input
+            type="number"
+            step={1}
+            value={groundElev != null ? Math.round(groundElev) : ""}
+            placeholder="…"
+            onChange={(e) => {
+              const raw = e.target.value
+              onGroundChange(raw === "" ? null : Number.parseFloat(raw))
+            }}
+            className="w-full rounded-md border border-input bg-secondary/60 px-2 py-1 pr-10 font-mono text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/40"
+          />
+          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[10px] text-muted-foreground">
+            m ASL
+          </span>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="w-14 shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground/80">
           {antennaLabel}
         </span>
         <div className="relative flex-1">
@@ -68,10 +95,21 @@ function GridField({
           </span>
         </div>
       </div>
-      <p className="font-mono text-[10px] text-muted-foreground/80">
-        {groundElev != null && antennaAsl != null
-          ? `ground ${groundElev.toFixed(0)} m + ant = ${antennaAsl.toFixed(0)} m ASL`
-          : "ground elevation pending"}
+      <p className="flex items-center justify-between font-mono text-[10px] text-muted-foreground/80">
+        <span>
+          {antennaAsl != null
+            ? `= ${antennaAsl.toFixed(0)} m ASL at antenna`
+            : "ground elevation pending"}
+        </span>
+        {overridden && (
+          <button
+            type="button"
+            onClick={() => onGroundChange(null)}
+            className="text-[10px] text-primary underline-offset-2 hover:underline"
+          >
+            reset{fetchedGround != null ? ` (${Math.round(fetchedGround)} m)` : ""}
+          </button>
+        )}
       </p>
     </div>
   )
@@ -89,11 +127,17 @@ export function StationControls({
   dxAntM,
   myGround,
   dxGround,
+  myFetchedGround,
+  dxFetchedGround,
+  myGroundOverridden,
+  dxGroundOverridden,
   onCallsignChange,
   onMyChange,
   onDxChange,
   onMyAntChange,
   onDxAntChange,
+  onMyGroundChange,
+  onDxGroundChange,
 }: {
   callsign: string
   myGrid: string
@@ -106,11 +150,17 @@ export function StationControls({
   dxAntM: number
   myGround: number | null
   dxGround: number | null
+  myFetchedGround: number | null
+  dxFetchedGround: number | null
+  myGroundOverridden: boolean
+  dxGroundOverridden: boolean
   onCallsignChange: (v: string) => void
   onMyChange: (v: string) => void
   onDxChange: (v: string) => void
   onMyAntChange: (v: number) => void
   onDxAntChange: (v: number) => void
+  onMyGroundChange: (v: number | null) => void
+  onDxGroundChange: (v: number | null) => void
 }) {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -138,10 +188,13 @@ export function StationControls({
         coords={myCoords}
         valid={myValid}
         onChange={onMyChange}
-        antennaLabel="My Antenna"
+        antennaLabel="My Ant"
         antennaHeight={myAntM}
         onAntennaChange={onMyAntChange}
         groundElev={myGround}
+        fetchedGround={myFetchedGround}
+        overridden={myGroundOverridden}
+        onGroundChange={onMyGroundChange}
         antennaAsl={myGround != null ? myGround + myAntM : null}
       />
       <GridField
@@ -151,10 +204,13 @@ export function StationControls({
         coords={dxCoords}
         valid={dxValid}
         onChange={onDxChange}
-        antennaLabel="DX Antenna"
+        antennaLabel="DX Ant"
         antennaHeight={dxAntM}
         onAntennaChange={onDxAntChange}
         groundElev={dxGround}
+        fetchedGround={dxFetchedGround}
+        overridden={dxGroundOverridden}
+        onGroundChange={onDxGroundChange}
         antennaAsl={dxGround != null ? dxGround + dxAntM : null}
       />
     </div>

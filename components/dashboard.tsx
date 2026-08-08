@@ -58,6 +58,9 @@ export function Dashboard() {
   const [callsign, setCallsign] = useState("")
   const [myAntM, setMyAntM] = useState(10)
   const [dxAntM, setDxAntM] = useState(10)
+  // Manual ground-elevation overrides (m ASL). null = use fetched grid value.
+  const [myGroundOverride, setMyGroundOverride] = useState<number | null>(null)
+  const [dxGroundOverride, setDxGroundOverride] = useState<number | null>(null)
   const [now, setNow] = useState(() => Date.now())
 
   // Load saved operator settings from localStorage on mount
@@ -80,6 +83,29 @@ export function Dashboard() {
   useEffect(() => {
     localStorage.setItem("dxAntennaM", String(dxAntM))
   }, [dxAntM])
+
+  // Load any saved ground-elevation override for the current grid. Runs on
+  // mount and whenever the grid changes, so a new location starts fresh (or
+  // restores a previously-saved manual value keyed to that grid).
+  useEffect(() => {
+    const stored = localStorage.getItem(`groundElev:${myGrid}`)
+    setMyGroundOverride(stored != null ? Number.parseFloat(stored) : null)
+  }, [myGrid])
+  useEffect(() => {
+    const stored = localStorage.getItem(`groundElev:${dxGrid}`)
+    setDxGroundOverride(stored != null ? Number.parseFloat(stored) : null)
+  }, [dxGrid])
+
+  const setMyGround = (v: number | null) => {
+    setMyGroundOverride(v)
+    if (v == null) localStorage.removeItem(`groundElev:${myGrid}`)
+    else localStorage.setItem(`groundElev:${myGrid}`, String(v))
+  }
+  const setDxGround = (v: number | null) => {
+    setDxGroundOverride(v)
+    if (v == null) localStorage.removeItem(`groundElev:${dxGrid}`)
+    else localStorage.setItem(`groundElev:${dxGrid}`, String(v))
+  }
 
   // 1 Hz tick for ETA countdowns
   useEffect(() => {
@@ -140,11 +166,14 @@ export function Dashboard() {
 
   const clearance = useMemo(() => {
     if (!terrain?.elevations?.length) return null
-    return analyzeClearance(terrain, myAntM, dxAntM)
-  }, [terrain, myAntM, dxAntM])
+    return analyzeClearance(terrain, myAntM, dxAntM, myGroundOverride, dxGroundOverride)
+  }, [terrain, myAntM, dxAntM, myGroundOverride, dxGroundOverride])
 
-  const myGround = terrain?.elevations?.[0] ?? null
-  const dxGround = terrain?.elevations?.[terrain.elevations.length - 1] ?? null
+  const myFetchedGround = terrain?.elevations?.[0] ?? null
+  const dxFetchedGround = terrain?.elevations?.[terrain.elevations.length - 1] ?? null
+  // Effective ground = manual override when present, else the fetched value.
+  const myGround = myGroundOverride ?? myFetchedGround
+  const dxGround = dxGroundOverride ?? dxFetchedGround
 
   const pathDistance = myCoords && dxCoords ? distanceKm(myCoords, dxCoords) : 0
   const pathBearing = myCoords && dxCoords ? bearing(myCoords, dxCoords) : 0
@@ -207,11 +236,17 @@ export function Dashboard() {
           dxAntM={dxAntM}
           myGround={myGround}
           dxGround={dxGround}
+          myFetchedGround={myFetchedGround}
+          dxFetchedGround={dxFetchedGround}
+          myGroundOverridden={myGroundOverride != null}
+          dxGroundOverridden={dxGroundOverride != null}
           onCallsignChange={setCallsign}
           onMyChange={setMyGrid}
           onDxChange={setDxGrid}
           onMyAntChange={setMyAntM}
           onDxAntChange={setDxAntM}
+          onMyGroundChange={setMyGround}
+          onDxGroundChange={setDxGround}
         />
       </div>
 
@@ -253,16 +288,26 @@ export function Dashboard() {
 
           <section className="rounded-lg border border-border bg-card p-4">
             <h2 className="mb-3 text-sm font-semibold tracking-tight">Probability Key</h2>
-            {clearance?.obstructed && (
-              <div
-                role="alert"
-                className="mb-3 rounded-md border border-destructive/50 bg-destructive/15 px-3 py-2 text-[11px] leading-tight"
-              >
-                <p className="font-semibold text-destructive">Obstructed Path</p>
-                <p className="mt-0.5 text-muted-foreground">
-                  High take-off angle required (≥{" "}
-                  {clearance.requiredTakeoffDeg.toFixed(1)}°). Terrain blocks direct
-                  line of sight.
+            {clearance && (
+              <div className="mb-3 rounded-md border border-border bg-secondary/40 px-3 py-2 text-[11px] leading-tight">
+                <p className="font-semibold text-foreground">Min Take-off Angle</p>
+                <p className="mt-1 flex items-center justify-between font-mono text-muted-foreground">
+                  <span>
+                    <span className="text-primary">HOME</span> clears hill @{" "}
+                    {clearance.homeObstructionKm.toFixed(1)} km
+                  </span>
+                  <span className="text-foreground">
+                    {clearance.homeTakeoffDeg.toFixed(1)}°
+                  </span>
+                </p>
+                <p className="mt-0.5 flex items-center justify-between font-mono text-muted-foreground">
+                  <span>
+                    <span className="text-chart-5">DX</span> clears hill @{" "}
+                    {clearance.dxObstructionKm.toFixed(1)} km
+                  </span>
+                  <span className="text-foreground">
+                    {clearance.dxTakeoffDeg.toFixed(1)}°
+                  </span>
                 </p>
               </div>
             )}

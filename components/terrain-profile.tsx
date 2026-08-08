@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
-import { Mountain, TriangleAlert } from "lucide-react"
+import { Mountain } from "lucide-react"
 
 import type { ClearanceResult, TerrainProfile } from "@/lib/terrain"
 
@@ -27,14 +27,25 @@ export function TerrainProfileChart({
     const plotW = W - PAD.left - PAD.right
     const plotH = H - PAD.top - PAD.bottom
 
-    // Curvature-corrected ("bulge-added") view: the effective terrain is the
-    // primary curve so LOS clipping is visually obvious. Y range spans the
-    // effective terrain and the LOS line, with a little headroom.
-    const allY = [...eff, ...clearance.losLine]
+    const x = (km: number) => PAD.left + (totalKm > 0 ? km / totalKm : 0) * plotW
+
+    // Take-off beam endpoints (heights where each beam grazes its worst hill).
+    const homeBeamEnd =
+      clearance.homeAsl +
+      Math.tan((clearance.homeTakeoffDeg * Math.PI) / 180) *
+        clearance.homeObstructionKm *
+        1000
+    const dxBeamEnd =
+      clearance.dxAsl +
+      Math.tan((clearance.dxTakeoffDeg * Math.PI) / 180) *
+        clearance.dxObstructionKm *
+        1000
+
+    // Curvature-corrected view: effective terrain is the primary curve.
+    const allY = [...eff, clearance.homeAsl, clearance.dxAsl, homeBeamEnd, dxBeamEnd]
     const yMin = Math.min(0, ...allY)
     const yMax = Math.max(...allY) * 1.08 || 100
 
-    const x = (km: number) => PAD.left + (totalKm > 0 ? km / totalKm : 0) * plotW
     const y = (m: number) =>
       PAD.top + plotH - ((m - yMin) / (yMax - yMin || 1)) * plotH
 
@@ -48,14 +59,20 @@ export function TerrainProfileChart({
 
     // Raw ground elevation as a subtle secondary reference line.
     const groundLine =
-      "M " +
-      elevations
-        .map((e, i) => `${x(distances[i])},${y(e)}`)
-        .join(" L ")
+      "M " + elevations.map((e, i) => `${x(distances[i])},${y(e)}`).join(" L ")
 
+    // Direct A-to-B path — reference only (NOT the scatter path).
     const losPath = `M ${x(0)},${y(clearance.losLine[0])} L ${x(totalKm)},${y(
       clearance.losLine[clearance.losLine.length - 1],
     )}`
+
+    // Take-off beam rays from each antenna up to their limiting hill.
+    const homeBeam = `M ${x(0)},${y(clearance.homeAsl)} L ${x(
+      clearance.homeObstructionKm,
+    )},${y(homeBeamEnd)}`
+    const dxBeam = `M ${x(totalKm)},${y(clearance.dxAsl)} L ${x(
+      totalKm - clearance.dxObstructionKm,
+    )},${y(dxBeamEnd)}`
 
     // Y-axis ticks (4 divisions).
     const ticks = Array.from({ length: 4 }, (_, i) => {
@@ -63,19 +80,14 @@ export function TerrainProfileChart({
       return { v, y: y(v) }
     })
 
-    const worst = {
-      x: x(distances[clearance.worstIndex]),
-      yTerrain: y(clearance.effectiveTerrain[clearance.worstIndex]),
-      yLos: y(clearance.losLine[clearance.worstIndex]),
-    }
-
     return {
       areaPath,
       terrainLine,
       groundLine,
       losPath,
+      homeBeam,
+      dxBeam,
       ticks,
-      worst,
       homeXY: { x: x(0), y: y(clearance.homeAsl) },
       dxXY: { x: x(totalKm), y: y(clearance.dxAsl) },
       totalKm,
@@ -87,36 +99,40 @@ export function TerrainProfileChart({
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold tracking-tight">
           <Mountain className="h-4 w-4 text-primary" />
-          Terrain Profile & Radio Horizon
+          Terrain Profile & Take-off Angle
         </h2>
         {clearance && !loading && (
           <span className="font-mono text-[11px] text-muted-foreground">
-            {profile ? `${profile.totalKm.toFixed(0)} km` : ""} ·{" "}
-            {clearance.obstructed ? (
-              <span className="text-prob-unlikely">blocked</span>
-            ) : (
-              <span className="text-prob-high">clear</span>
-            )}
+            {profile ? `${profile.totalKm.toFixed(0)} km` : ""} · HOME{" "}
+            <span className="text-primary">
+              {clearance.homeTakeoffDeg.toFixed(1)}°
+            </span>{" "}
+            · DX{" "}
+            <span className="text-chart-5">{clearance.dxTakeoffDeg.toFixed(1)}°</span>
           </span>
         )}
       </div>
 
-      {/* Obstruction warning — the prominent probability-log indicator. */}
-      {clearance?.obstructed && (
-        <div
-          role="alert"
-          className="mb-3 flex items-start gap-2.5 rounded-md border border-destructive/50 bg-destructive/15 px-3 py-2.5"
-        >
-          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-          <div className="leading-tight">
-            <p className="text-sm font-semibold text-foreground">
-              Obstructed Path — High Take-off Angle Required
-            </p>
-            <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
-              Terrain clips LOS by {Math.abs(clearance.worstClearance).toFixed(0)} m.
-              Needs ≥ {clearance.requiredTakeoffDeg.toFixed(1)}° take-off from HOME.
-            </p>
-          </div>
+      {/* Explanatory note: scatter uses a sky reflection point, not direct LOS. */}
+      {clearance && !loading && (
+        <div className="mb-3 rounded-md border border-border bg-secondary/40 px-3 py-2.5 leading-relaxed">
+          <p className="text-[11px] text-muted-foreground">
+            <span className="font-semibold text-foreground">
+              Aircraft scatter reflects off a point in the sky
+            </span>{" "}
+            — an aircraft at altitude — so hills between the stations do{" "}
+            <span className="text-foreground">not</span> block the contact. What
+            matters is each station clearing its own local horizon. HOME needs a
+            minimum take-off angle of{" "}
+            <span className="font-mono text-primary">
+              {clearance.homeTakeoffDeg.toFixed(1)}°
+            </span>{" "}
+            (hill {clearance.homeObstructionKm.toFixed(1)} km out); DX needs{" "}
+            <span className="font-mono text-chart-5">
+              {clearance.dxTakeoffDeg.toFixed(1)}°
+            </span>{" "}
+            (hill {clearance.dxObstructionKm.toFixed(1)} km out).
+          </p>
         </div>
       )}
 
@@ -137,7 +153,7 @@ export function TerrainProfileChart({
             viewBox={`0 0 ${W} ${H}`}
             className="w-full"
             role="img"
-            aria-label="Terrain elevation profile with line-of-sight path"
+            aria-label="Terrain elevation profile with per-station take-off angles"
           >
             {/* Grid + Y ticks */}
             {geom.ticks.map((t, i) => (
@@ -181,29 +197,29 @@ export function TerrainProfileChart({
               opacity={0.5}
             />
 
-            {/* Line-of-sight (dashed) */}
+            {/* Direct A-to-B path — faint reference (not the scatter path) */}
             <path
               d={geom.losPath}
               fill="none"
-              stroke={
-                clearance?.obstructed ? "var(--destructive)" : "var(--prob-high)"
-              }
-              strokeWidth={2}
-              strokeDasharray="6 4"
+              stroke="var(--muted-foreground)"
+              strokeWidth={1}
+              strokeDasharray="4 4"
+              opacity={0.4}
             />
 
-            {/* Worst-peak clearance marker */}
-            {clearance?.obstructed && (
-              <line
-                x1={geom.worst.x}
-                x2={geom.worst.x}
-                y1={geom.worst.yTerrain}
-                y2={geom.worst.yLos}
-                stroke="var(--destructive)"
-                strokeWidth={1.5}
-                strokeDasharray="2 2"
-              />
-            )}
+            {/* Take-off beams from each station up over their local hill */}
+            <path
+              d={geom.homeBeam}
+              fill="none"
+              stroke="var(--primary)"
+              strokeWidth={2}
+            />
+            <path
+              d={geom.dxBeam}
+              fill="none"
+              stroke="var(--chart-5)"
+              strokeWidth={2}
+            />
 
             {/* Antenna endpoints */}
             <circle cx={geom.homeXY.x} cy={geom.homeXY.y} r={4} fill="var(--primary)" />
@@ -235,7 +251,7 @@ export function TerrainProfileChart({
               className="fill-muted-foreground font-mono"
               fontSize={9}
             >
-effective terrain (m ASL, Earth-curvature corrected)
+              effective terrain (m ASL, Earth-curvature corrected)
             </text>
           </svg>
 
@@ -249,15 +265,15 @@ effective terrain (m ASL, Earth-curvature corrected)
               raw ground
             </span>
             <span className="flex items-center gap-1.5">
+              <span className="inline-block h-0 w-4 border-t-2 border-primary" />
+              HOME take-off
+            </span>
+            <span className="flex items-center gap-1.5">
               <span
-                className="inline-block h-0 w-4 border-t-2 border-dashed"
-                style={{
-                  borderColor: clearance?.obstructed
-                    ? "var(--destructive)"
-                    : "var(--prob-high)",
-                }}
+                className="inline-block h-0 w-4 border-t-2"
+                style={{ borderColor: "var(--chart-5)" }}
               />
-              line of sight
+              DX take-off
             </span>
             {clearance && (
               <span>
