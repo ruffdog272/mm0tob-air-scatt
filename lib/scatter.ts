@@ -107,7 +107,7 @@ export function analyzeAircraft(
   // aircraft is effectively stationary and the vector is undefined.
   const headingDeg =
     speedKmS > 1e-6
-      ? (toDeg(Math.atan2(vEast, vNorth)) + 360) % 360
+      ? ((Math.atan2(vEast, vNorth) * 180) / Math.PI + 360) % 360
       : ((track % 360) + 360) % 360
 
   // Unit vectors from aircraft toward each station.
@@ -151,6 +151,7 @@ export function analyzeAircraft(
     altM: altFt * FT_TO_M,
     groundSpeedKt: gs,
     track,
+    headingDeg,
     crossTrackKm: ct,
     bearingFromHome: bearing(home, pos),
     rangeFromHomeKm,

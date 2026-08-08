@@ -26,26 +26,74 @@ function fmtEta(seconds: number | null): string {
   return `${m}:${s.toString().padStart(2, "0")}`
 }
 
+const COMPASS_POINTS = [
+  "N",
+  "NNE",
+  "NE",
+  "ENE",
+  "E",
+  "ESE",
+  "SE",
+  "SSE",
+  "S",
+  "SSW",
+  "SW",
+  "WSW",
+  "W",
+  "WNW",
+  "NW",
+  "NNW",
+]
+
+function compassPoint(deg: number): string {
+  const idx = Math.round((((deg % 360) + 360) % 360) / 22.5) % 16
+  return COMPASS_POINTS[idx]
+}
+
 function fmtAlt(altFt: number, altM: number): string {
   return `${Math.round(altFt).toLocaleString("en-US")} ft / ${Math.round(
     altM,
   ).toLocaleString("en-US")} m`
 }
 
-/** Compass dial showing the antenna azimuth from the home station. */
-function AzimuthDial({ deg, color }: { deg: number; color: string }) {
+/**
+ * Compass dial showing the aircraft's absolute flight heading (movement vector
+ * relative to true north). The needle points the same way the plane icon does
+ * on the map: 0=N (up), 90=E (right), 180=S (down), 270=W (left).
+ */
+function HeadingDial({ deg, color }: { deg: number; color: string }) {
   return (
-    <div className="relative h-9 w-9 shrink-0 rounded-full border border-border">
+    <div
+      className="relative h-9 w-9 shrink-0 rounded-full border border-border"
+      title={`Flight heading ${Math.round(deg)}°`}
+    >
+      {/* North tick */}
+      <span className="absolute left-1/2 top-0.5 -translate-x-1/2 text-[7px] leading-none text-muted-foreground/70">
+        N
+      </span>
+      {/* Heading needle: arrow points in the direction of travel */}
       <div
-        className="absolute left-1/2 top-1/2 h-3.5 w-px"
+        className="absolute left-1/2 top-1/2 h-4 w-0"
         style={{
-          background: color,
-          transform: `translate(-50%,-100%) rotate(${deg}deg)`,
-          transformOrigin: "bottom center",
+          transform: `translate(-50%, -50%) rotate(${deg}deg)`,
+          transformOrigin: "center center",
         }}
-      />
-      <span className="absolute inset-0 flex items-center justify-center font-mono text-[9px] text-muted-foreground">
-        {Math.round(deg)}
+      >
+        <div
+          className="absolute left-1/2 top-0 h-2.5 w-px -translate-x-1/2"
+          style={{ background: color }}
+        />
+        <div
+          className="absolute left-1/2 top-0 h-0 w-0 -translate-x-1/2 -translate-y-0.5"
+          style={{
+            borderLeft: "2.5px solid transparent",
+            borderRight: "2.5px solid transparent",
+            borderBottom: `4px solid ${color}`,
+          }}
+        />
+      </div>
+      <span className="absolute -bottom-3 left-1/2 -translate-x-1/2 font-mono text-[8px] text-muted-foreground">
+        {Math.round(deg)}°
       </span>
     </div>
   )
@@ -70,7 +118,7 @@ function AircraftRow({
         className="grid w-full grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md border-l-2 bg-secondary/30 px-3 py-2.5 text-left transition hover:bg-secondary/70 focus:outline-none focus:ring-2 focus:ring-ring/50"
         style={{ borderLeftColor: meta.color }}
       >
-        <AzimuthDial deg={a.bearingFromHome} color={meta.color} />
+        <HeadingDial deg={a.headingDeg} color={meta.color} />
 
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -230,6 +278,10 @@ function AircraftDetail({
         <div className="px-5 pb-5 pt-3">
           <DetailRow label="Altitude" value={fmtAlt(a.altFt, a.altM)} />
           <DetailRow
+            label="Flight Heading"
+            value={`${a.headingDeg.toFixed(1)}° (${compassPoint(a.headingDeg)})`}
+          />
+          <DetailRow
             label="Antenna Azimuth"
             value={`${a.bearingFromHome.toFixed(1)}°`}
           />
@@ -248,7 +300,10 @@ function AircraftDetail({
             ).toFixed(2)} km`}
             color={meta.color}
           />
-          <DetailRow label="Ground track" value={`${Math.round(a.track)}°`} />
+          <DetailRow
+            label="Reported track (ADS-B)"
+            value={`${Math.round(a.track)}°`}
+          />
           <DetailRow
             label={`Doppler (${BANDS.find((b) => b.key === band)?.label ?? band})`}
             value={fmtDoppler(a.doppler[band])}
@@ -299,20 +354,28 @@ export function AircraftFeed({
             {aircraft.length} inbound
           </span>
         </div>
-        <div className="flex items-center gap-1 rounded-md bg-secondary p-0.5">
-          {BANDS.map((b) => (
-            <button
-              key={b.key}
-              onClick={() => onBandChange(b.key)}
-              className={`rounded px-2 py-1 font-mono text-[11px] transition ${
-                band === b.key
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {b.label}
-            </button>
-          ))}
+        <div
+          role="group"
+          aria-label="Doppler band"
+          className="flex items-center gap-1 rounded-lg border border-border bg-secondary/60 p-1"
+        >
+          {BANDS.map((b) => {
+            const active = band === b.key
+            return (
+              <button
+                key={b.key}
+                onClick={() => onBandChange(b.key)}
+                aria-pressed={active}
+                className={`rounded-md px-2.5 py-1 font-mono text-[11px] font-semibold transition ${
+                  active
+                    ? "bg-primary text-primary-foreground shadow-sm ring-1 ring-primary/60"
+                    : "bg-transparent text-muted-foreground hover:bg-secondary hover:text-foreground"
+                }`}
+              >
+                {b.label}
+              </button>
+            )
+          })}
         </div>
       </header>
 
