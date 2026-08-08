@@ -58,6 +58,8 @@ export interface AnalyzedAircraft {
   crossTrackKm: number
   /** current perpendicular distance to the BOUNDED path segment (km) */
   distToSegmentKm: number
+  /** distance projected ALONG the path from HOME (km), clamped to [0, segLen] */
+  alongTrackKm: number
   /** closest the projected trajectory comes to the segment within horizon (km) */
   minTrajectoryDistKm: number
   /** true when the forward trajectory will cross the segment within the horizon */
@@ -161,6 +163,13 @@ export function analyzeAircraft(
 
   const distToSegmentKm = segDist(pEnu.east, pEnu.north)
 
+  // Projection of the aircraft onto the path, measured from HOME, clamped to
+  // the segment. Used to place the aircraft on the terrain-profile X-axis.
+  const alongTrackKm = Math.min(
+    segLen,
+    Math.max(0, pEnu.east * dHatE + pEnu.north * dHatN),
+  )
+
   // Project the trajectory forward and solve for the moment it crosses the
   // segment's line; only counts if the crossing lands BETWEEN the stations and
   // inside the look-ahead horizon.
@@ -222,6 +231,7 @@ export function analyzeAircraft(
     headingDeg,
     crossTrackKm: ct,
     distToSegmentKm,
+    alongTrackKm,
     minTrajectoryDistKm,
     willIntersect,
     crossingPoint,

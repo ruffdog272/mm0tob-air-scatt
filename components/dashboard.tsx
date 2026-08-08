@@ -267,6 +267,7 @@ export function Dashboard() {
             <TerrainProfileChart
               profile={terrain ?? null}
               clearance={clearance}
+              aircraft={aircraft}
               loading={!terrain && !terrainError}
               error={Boolean(terrainError)}
             />

@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Antenna, ArrowUpRight, Gauge, Plane, Radio, X } from "lucide-react"
+import { Antenna, ArrowUpRight, Gauge, Plane, Radio, Timer, X } from "lucide-react"
 
 import { BANDS, type AnalyzedAircraft, type Probability } from "@/lib/scatter"
 
@@ -291,6 +291,31 @@ function AircraftDetail({
         </div>
 
         <div className="px-5 pb-5 pt-3">
+          {/* Prominent live ETA-to-path-intersection countdown */}
+          <div
+            className="mb-3 flex items-center justify-between gap-3 rounded-lg border px-4 py-3"
+            style={{
+              borderColor: a.willIntersect ? meta.color : "var(--border)",
+              background: a.willIntersect ? `${meta.color}14` : "var(--secondary)",
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <Timer
+                className="h-4 w-4"
+                style={{ color: a.willIntersect ? meta.color : "var(--muted-foreground)" }}
+              />
+              <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                ETA to Path Intersection
+              </span>
+            </div>
+            <span
+              className="font-mono text-2xl font-semibold tabular-nums"
+              style={{ color: a.willIntersect ? meta.color : "var(--muted-foreground)" }}
+            >
+              {a.willIntersect ? fmtEta(remainingEta) : "no cross"}
+            </span>
+          </div>
+
           <DetailRow label="Altitude" value={fmtAlt(a.altFt, a.altM)} />
           <DetailRow
             label="Flight Heading"

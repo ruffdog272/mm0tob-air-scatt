@@ -4,19 +4,38 @@ import { useMemo } from "react"
 import { Mountain } from "lucide-react"
 
 import type { ClearanceResult, TerrainProfile } from "@/lib/terrain"
+import type { AnalyzedAircraft, Probability } from "@/lib/scatter"
 
 const W = 800
-const H = 240
-const PAD = { top: 16, right: 16, bottom: 28, left: 44 }
+const H = 300
+const PAD = { top: 16, right: 16, bottom: 52, left: 52 }
+
+// Display ceiling for the Y (altitude) axis, so a near-zero take-off angle can't
+// send the common-volume apex to infinity. Comfortably above typical cruise.
+const Y_CEILING_M = 13000
+
+const PROB_COLOR: Record<Probability, string> = {
+  high: "var(--prob-high)",
+  marginal: "var(--prob-marginal)",
+  unlikely: "var(--prob-unlikely)",
+}
+
+// Data-viz colors requested by spec: green/brown ground, pink common volume.
+const TERRAIN_FILL = "#6b7250"
+const TERRAIN_LINE = "#8a9166"
+const PINK_FILL = "rgba(244, 114, 182, 0.16)"
+const PINK_LINE = "rgba(244, 114, 182, 0.55)"
 
 export function TerrainProfileChart({
   profile,
   clearance,
+  aircraft,
   loading,
   error,
 }: {
   profile: TerrainProfile | null
   clearance: ClearanceResult | null
+  aircraft: AnalyzedAircraft[]
   loading: boolean
   error: boolean
 }) {
@@ -29,27 +48,40 @@ export function TerrainProfileChart({
 
     const x = (km: number) => PAD.left + (totalKm > 0 ? km / totalKm : 0) * plotW
 
+    const tanH = Math.tan((clearance.homeTakeoffDeg * Math.PI) / 180)
+    const tanD = Math.tan((clearance.dxTakeoffDeg * Math.PI) / 180)
+
     // Take-off beam endpoints (heights where each beam grazes its worst hill).
     const homeBeamEnd =
-      clearance.homeAsl +
-      Math.tan((clearance.homeTakeoffDeg * Math.PI) / 180) *
-        clearance.homeObstructionKm *
-        1000
-    const dxBeamEnd =
-      clearance.dxAsl +
-      Math.tan((clearance.dxTakeoffDeg * Math.PI) / 180) *
-        clearance.dxObstructionKm *
-        1000
+      clearance.homeAsl + tanH * clearance.homeObstructionKm * 1000
+    const dxBeamEnd = clearance.dxAsl + tanD * clearance.dxObstructionKm * 1000
 
-    // Curvature-corrected view: effective terrain is the primary curve.
-    const allY = [...eff, clearance.homeAsl, clearance.dxAsl, homeBeamEnd, dxBeamEnd]
-    const yMin = Math.min(0, ...allY)
-    const yMax = Math.max(...allY) * 1.08 || 100
+    // --- Common-volume triangle apex (where the two take-off beams meet) ---
+    // Solve homeAsl + tanH*x*1000 = dxAsl + tanD*(totalKm - x)*1000 for x (km).
+    let apexKm = totalKm / 2
+    let apexM = Y_CEILING_M
+    const denom = 1000 * (tanH + tanD)
+    if (denom > 1e-6) {
+      apexKm =
+        (clearance.dxAsl - clearance.homeAsl + tanD * totalKm * 1000) / denom
+      apexM = clearance.homeAsl + tanH * apexKm * 1000
+    }
+    if (!Number.isFinite(apexKm) || apexKm < 0 || apexKm > totalKm) {
+      apexKm = totalKm / 2
+    }
+    if (!Number.isFinite(apexM) || apexM <= 0) apexM = Y_CEILING_M
+
+    const maxAcAltM = aircraft.reduce((m, a) => Math.max(m, a.altM), 0)
+
+    // Y range: terrain up to the scatter zone, capped so it stays readable.
+    const yMin = Math.min(0, ...eff, clearance.homeAsl, clearance.dxAsl)
+    const yTop = Math.max(apexM, maxAcAltM, homeBeamEnd, dxBeamEnd, 1000) * 1.08
+    const yMax = Math.min(Y_CEILING_M, yTop) || Y_CEILING_M
 
     const y = (m: number) =>
       PAD.top + plotH - ((m - yMin) / (yMax - yMin || 1)) * plotH
 
-    // Effective-terrain area (filled to the baseline) + its outline.
+    // Effective-terrain area (filled to baseline) + outline.
     const effTop = eff.map((e, i) => `${x(distances[i])},${y(e)}`)
     const areaPath =
       `M ${x(0)},${y(yMin)} ` +
@@ -61,45 +93,63 @@ export function TerrainProfileChart({
     const groundLine =
       "M " + elevations.map((e, i) => `${x(distances[i])},${y(e)}`).join(" L ")
 
-    // Direct A-to-B path — reference only (NOT the scatter path).
-    const losPath = `M ${x(0)},${y(clearance.losLine[0])} L ${x(totalKm)},${y(
-      clearance.losLine[clearance.losLine.length - 1],
-    )}`
+    // Common-volume inverted triangle: HOME -> apex -> DX.
+    const trianglePath =
+      `M ${x(0)},${y(clearance.homeAsl)} ` +
+      `L ${x(apexKm)},${y(apexM)} ` +
+      `L ${x(totalKm)},${y(clearance.dxAsl)}`
 
-    // Take-off beam rays from each antenna up to their limiting hill.
-    const homeBeam = `M ${x(0)},${y(clearance.homeAsl)} L ${x(
-      clearance.homeObstructionKm,
-    )},${y(homeBeamEnd)}`
-    const dxBeam = `M ${x(totalKm)},${y(clearance.dxAsl)} L ${x(
-      totalKm - clearance.dxObstructionKm,
-    )},${y(dxBeamEnd)}`
+    // Take-off beam rays (the two sides of the triangle up to the apex).
+    const homeBeam = `M ${x(0)},${y(clearance.homeAsl)} L ${x(apexKm)},${y(apexM)}`
+    const dxBeam = `M ${x(totalKm)},${y(clearance.dxAsl)} L ${x(apexKm)},${y(apexM)}`
 
-    // Y-axis ticks (4 divisions).
-    const ticks = Array.from({ length: 4 }, (_, i) => {
-      const v = yMin + ((yMax - yMin) * i) / 3
+    // Plotted aircraft: X = along-track distance from HOME, Y = altitude ASL.
+    const planes = aircraft.map((a) => ({
+      hex: a.hex,
+      callsign: a.callsign,
+      cx: x(a.alongTrackKm),
+      cy: y(Math.min(a.altM, yMax)),
+      clipped: a.altM > yMax,
+      color: PROB_COLOR[a.probability],
+      rot: a.headingDeg,
+    }))
+
+    // Y ticks (altitude).
+    const yTicks = Array.from({ length: 5 }, (_, i) => {
+      const v = yMin + ((yMax - yMin) * i) / 4
       return { v, y: y(v) }
+    })
+    // X ticks (distance from HOME).
+    const xTicks = Array.from({ length: 5 }, (_, i) => {
+      const km = (totalKm * i) / 4
+      return { km, x: x(km) }
     })
 
     return {
       areaPath,
       terrainLine,
       groundLine,
-      losPath,
+      trianglePath,
       homeBeam,
       dxBeam,
-      ticks,
+      planes,
+      yTicks,
+      xTicks,
+      apex: { x: x(apexKm), y: y(apexM), km: apexKm, m: apexM },
       homeXY: { x: x(0), y: y(clearance.homeAsl) },
       dxXY: { x: x(totalKm), y: y(clearance.dxAsl) },
       totalKm,
+      plotY0: PAD.top,
+      plotYH: plotH,
     }
-  }, [profile, clearance])
+  }, [profile, clearance, aircraft])
 
   return (
     <section className="rounded-lg border border-border bg-card p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold tracking-tight">
           <Mountain className="h-4 w-4 text-primary" />
-          Terrain Profile & Take-off Angle
+          Terrain Profile & Common Volume
         </h2>
         {clearance && !loading && (
           <span className="font-mono text-[11px] text-muted-foreground">
@@ -120,18 +170,22 @@ export function TerrainProfileChart({
             <span className="font-semibold text-foreground">
               Aircraft scatter reflects off a point in the sky
             </span>{" "}
-            — an aircraft at altitude — so hills between the stations do{" "}
-            <span className="text-foreground">not</span> block the contact. What
-            matters is each station clearing its own local horizon. HOME needs a
-            minimum take-off angle of{" "}
+            — so hills between the stations do{" "}
+            <span className="text-foreground">not</span> block the contact. Each
+            station beams up over its own local horizon; where the two beams
+            overlap is the{" "}
+            <span style={{ color: PINK_LINE }} className="font-semibold">
+              common volume
+            </span>{" "}
+            scatter zone. HOME take-off{" "}
             <span className="font-mono text-primary">
               {clearance.homeTakeoffDeg.toFixed(1)}°
-            </span>{" "}
-            (hill {clearance.homeObstructionKm.toFixed(1)} km out); DX needs{" "}
+            </span>
+            , DX take-off{" "}
             <span className="font-mono text-chart-5">
               {clearance.dxTakeoffDeg.toFixed(1)}°
-            </span>{" "}
-            (hill {clearance.dxObstructionKm.toFixed(1)} km out).
+            </span>
+            .
           </p>
         </div>
       )}
@@ -153,11 +207,22 @@ export function TerrainProfileChart({
             viewBox={`0 0 ${W} ${H}`}
             className="w-full"
             role="img"
-            aria-label="Terrain elevation profile with per-station take-off angles"
+            aria-label="Terrain elevation profile with common-volume scatter zone and live aircraft"
           >
-            {/* Grid + Y ticks */}
-            {geom.ticks.map((t, i) => (
-              <g key={i}>
+            <defs>
+              <clipPath id="plotClip">
+                <rect
+                  x={PAD.left}
+                  y={geom.plotY0}
+                  width={W - PAD.left - PAD.right}
+                  height={geom.plotYH}
+                />
+              </clipPath>
+            </defs>
+
+            {/* Grid + Y ticks (altitude, m) */}
+            {geom.yTicks.map((t, i) => (
+              <g key={`y${i}`}>
                 <line
                   x1={PAD.left}
                   x2={W - PAD.right}
@@ -165,7 +230,7 @@ export function TerrainProfileChart({
                   y2={t.y}
                   stroke="var(--border)"
                   strokeWidth={1}
-                  opacity={0.5}
+                  opacity={0.4}
                 />
                 <text
                   x={PAD.left - 6}
@@ -174,111 +239,160 @@ export function TerrainProfileChart({
                   className="fill-muted-foreground font-mono"
                   fontSize={9}
                 >
-                  {Math.round(t.v)}
+                  {Math.round(t.v).toLocaleString("en-US")}
                 </text>
               </g>
             ))}
 
-            {/* Effective terrain (curvature-corrected) fill + outline */}
-            <path d={geom.areaPath} fill="var(--secondary)" opacity={0.9} />
-            <path
-              d={geom.terrainLine}
-              fill="none"
-              stroke="var(--muted-foreground)"
-              strokeWidth={1.5}
-            />
-            {/* Raw ground elevation reference */}
-            <path
-              d={geom.groundLine}
-              fill="none"
-              stroke="var(--muted-foreground)"
-              strokeWidth={1}
-              strokeDasharray="1 3"
-              opacity={0.5}
-            />
+            {/* X ticks (distance from HOME, km) */}
+            {geom.xTicks.map((t, i) => (
+              <g key={`x${i}`}>
+                <line
+                  x1={t.x}
+                  x2={t.x}
+                  y1={geom.plotY0}
+                  y2={geom.plotY0 + geom.plotYH}
+                  stroke="var(--border)"
+                  strokeWidth={1}
+                  opacity={0.25}
+                />
+                <text
+                  x={t.x}
+                  y={geom.plotY0 + geom.plotYH + 14}
+                  textAnchor="middle"
+                  className="fill-muted-foreground font-mono"
+                  fontSize={9}
+                >
+                  {Math.round(t.km)}
+                </text>
+              </g>
+            ))}
 
-            {/* Direct A-to-B path — faint reference (not the scatter path) */}
-            <path
-              d={geom.losPath}
-              fill="none"
-              stroke="var(--muted-foreground)"
-              strokeWidth={1}
-              strokeDasharray="4 4"
-              opacity={0.4}
-            />
+            <g clipPath="url(#plotClip)">
+              {/* Common-volume triangle (pink) */}
+              <path d={geom.trianglePath} fill={PINK_FILL} stroke="none" />
+              <path
+                d={geom.homeBeam}
+                fill="none"
+                stroke={PINK_LINE}
+                strokeWidth={1.5}
+              />
+              <path
+                d={geom.dxBeam}
+                fill="none"
+                stroke={PINK_LINE}
+                strokeWidth={1.5}
+              />
 
-            {/* Take-off beams from each station up over their local hill */}
-            <path
-              d={geom.homeBeam}
-              fill="none"
-              stroke="var(--primary)"
-              strokeWidth={2}
-            />
-            <path
-              d={geom.dxBeam}
-              fill="none"
-              stroke="var(--chart-5)"
-              strokeWidth={2}
-            />
+              {/* Effective terrain (curvature-corrected) fill + outline */}
+              <path d={geom.areaPath} fill={TERRAIN_FILL} opacity={0.92} />
+              <path
+                d={geom.terrainLine}
+                fill="none"
+                stroke={TERRAIN_LINE}
+                strokeWidth={1.5}
+              />
+              {/* Raw ground elevation reference */}
+              <path
+                d={geom.groundLine}
+                fill="none"
+                stroke={TERRAIN_LINE}
+                strokeWidth={1}
+                strokeDasharray="1 3"
+                opacity={0.6}
+              />
+
+              {/* Live aircraft plotted at (along-track distance, altitude) */}
+              {geom.planes.map((p) => (
+                <g key={p.hex} transform={`translate(${p.cx}, ${p.cy})`}>
+                  <circle r={5} fill={p.color} fillOpacity={0.25} />
+                  <g transform={`rotate(${p.rot})`}>
+                    <path
+                      d="M 0,-4 L 3,4 L 0,2 L -3,4 Z"
+                      fill={p.color}
+                      stroke="var(--card)"
+                      strokeWidth={0.5}
+                    />
+                  </g>
+                </g>
+              ))}
+            </g>
 
             {/* Antenna endpoints */}
             <circle cx={geom.homeXY.x} cy={geom.homeXY.y} r={4} fill="var(--primary)" />
             <circle cx={geom.dxXY.x} cy={geom.dxXY.y} r={4} fill="var(--chart-5)" />
 
-            {/* X axis labels */}
+            {/* Station labels on X axis */}
             <text
               x={PAD.left}
-              y={H - 8}
+              y={geom.plotY0 + geom.plotYH + 14}
               textAnchor="start"
               className="fill-primary font-mono"
               fontSize={9}
             >
-              HOME
+              0 · HOME
             </text>
             <text
               x={W - PAD.right}
-              y={H - 8}
+              y={geom.plotY0 + geom.plotYH + 14}
               textAnchor="end"
               className="fill-chart-5 font-mono"
               fontSize={9}
             >
-              DX
+              {Math.round(geom.totalKm)} · DX
             </text>
+
+            {/* Axis titles */}
             <text
               x={(PAD.left + W - PAD.right) / 2}
-              y={H - 8}
+              y={H - 6}
               textAnchor="middle"
-              className="fill-muted-foreground font-mono"
-              fontSize={9}
+              className="fill-foreground font-mono"
+              fontSize={10}
             >
-              effective terrain (m ASL, Earth-curvature corrected)
+              Distance between Stations (km)
+            </text>
+            <text
+              x={14}
+              y={PAD.top + geom.plotYH / 2}
+              textAnchor="middle"
+              className="fill-foreground font-mono"
+              fontSize={10}
+              transform={`rotate(-90, 14, ${PAD.top + geom.plotYH / 2})`}
+            >
+              Altitude (m)
             </text>
           </svg>
 
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[10px] text-muted-foreground">
+          {/* Legend */}
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 font-mono text-[10px] text-muted-foreground">
             <span className="flex items-center gap-1.5">
-              <span className="inline-block h-2 w-2 rounded-full bg-secondary ring-1 ring-muted-foreground" />
-              effective terrain
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="inline-block h-0 w-4 border-t border-dotted border-muted-foreground" />
-              raw ground
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="inline-block h-0 w-4 border-t-2 border-primary" />
-              HOME take-off
+              <span
+                className="inline-block h-2 w-3 rounded-sm"
+                style={{ background: TERRAIN_FILL, outline: `1px solid ${TERRAIN_LINE}` }}
+              />
+              Ground terrain
             </span>
             <span className="flex items-center gap-1.5">
               <span
-                className="inline-block h-0 w-4 border-t-2"
-                style={{ borderColor: "var(--chart-5)" }}
+                className="inline-block h-2 w-3 rounded-sm"
+                style={{ background: PINK_FILL, outline: `1px solid ${PINK_LINE}` }}
               />
-              DX take-off
+              Common volume (mutual visibility)
             </span>
-            {clearance && (
-              <span>
-                HOME {clearance.homeAsl.toFixed(0)} m · DX {clearance.dxAsl.toFixed(0)} m
-                ASL
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block h-2 w-2 rounded-full bg-primary" />
+              HOME / DX antenna
+            </span>
+            <span className="flex items-center gap-1.5">
+              <svg width="12" height="12" viewBox="-6 -6 12 12" aria-hidden>
+                <path d="M 0,-4 L 3,4 L 0,2 L -3,4 Z" fill="var(--prob-high)" />
+              </svg>
+              Live aircraft (by probability)
+            </span>
+            {geom.apex.m >= Y_CEILING_M && (
+              <span className="text-muted-foreground/70">
+                (apex clipped at {Y_CEILING_M.toLocaleString("en-US")} m)
               </span>
             )}
           </div>
