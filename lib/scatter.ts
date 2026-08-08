@@ -47,6 +47,8 @@ export interface AnalyzedAircraft {
   altM: number
   groundSpeedKt: number
   track: number
+  /** absolute flight heading from the movement vector, 0-360 (0=N, 90=E) */
+  headingDeg: number
   /** signed cross-track distance to the signal path (km) */
   crossTrackKm: number
   /** bearing from home station to aircraft (deg) — antenna azimuth */
@@ -99,6 +101,14 @@ export function analyzeAircraft(
   const speedKmS = gs * KNOTS_TO_KM_S
   const vEast = speedKmS * Math.sin((track * Math.PI) / 180)
   const vNorth = speedKmS * Math.cos((track * Math.PI) / 180)
+
+  // Absolute flight heading derived from the movement vector relative to true
+  // north (0=N, 90=E, 180=S, 270=W). Falls back to reported track when the
+  // aircraft is effectively stationary and the vector is undefined.
+  const headingDeg =
+    speedKmS > 1e-6
+      ? (toDeg(Math.atan2(vEast, vNorth)) + 360) % 360
+      : ((track % 360) + 360) % 360
 
   // Unit vectors from aircraft toward each station.
   const homeENU = localENU(pos, home)
