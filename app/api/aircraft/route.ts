@@ -2,8 +2,9 @@ import { NextResponse } from "next/server"
 
 export const dynamic = "force-dynamic"
 
-// Proxy to the free public airplanes.live point endpoint to avoid CORS and
-// keep the browser polling our own origin.
+// Proxy to the free public adsb.fi open-data point endpoint to avoid CORS and
+// keep the browser polling our own origin. (airplanes.live's public v2 endpoint
+// now returns 403 to datacenter IPs; adsb.fi serves the same field schema.)
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const lat = Number.parseFloat(searchParams.get("lat") ?? "")
@@ -15,11 +16,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Invalid coordinates" }, { status: 400 })
   }
 
-  const url = `https://api.airplanes.live/v2/point/${lat.toFixed(4)}/${lon.toFixed(4)}/${radius}`
+  const url = `https://opendata.adsb.fi/api/v2/lat/${lat.toFixed(4)}/lon/${lon.toFixed(4)}/dist/${radius}`
 
   try {
     const res = await fetch(url, {
-      headers: { Accept: "application/json", "User-Agent": "ham-aircraft-scatter/1.0" },
+      headers: { Accept: "application/json" },
       cache: "no-store",
     })
     if (!res.ok) {
@@ -29,8 +30,11 @@ export async function GET(request: Request) {
       )
     }
     const data = await res.json()
+    // adsb.fi returns the array under `aircraft`; normalize to `ac` so the
+    // client keeps its existing shape.
+    const ac = data.aircraft ?? data.ac ?? []
     return NextResponse.json(
-      { ac: data.ac ?? [], now: data.now ?? Date.now() },
+      { ac, now: data.now ?? Date.now() },
       { headers: { "Cache-Control": "no-store" } },
     )
   } catch (err) {

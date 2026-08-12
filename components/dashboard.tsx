@@ -418,7 +418,7 @@ export function Dashboard() {
       </div>
 
       <footer className="pb-2 text-center font-mono text-[10px] text-muted-foreground/60">
-        ADS-B via airplanes.live · indices via NOAA SWPC · for experimental use
+        ADS-B via adsb.fi · indices via NOAA SWPC · for experimental use
       </footer>
     </div>
   )

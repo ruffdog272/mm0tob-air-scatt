@@ -76,9 +76,19 @@ export function TerrainProfileChart({
 
     const maxAcAltM = aircraft.reduce((m, a) => Math.max(m, a.altM), 0)
 
-    // Y range: terrain up to the scatter zone, capped so it stays readable.
+    // Y range: terrain up to the scatter zone. The funnel opens ABOVE the apex,
+    // so the ceiling must sit well above the crossover — otherwise the apex is
+    // pinned to the top and the funnel collapses to a sliver. Give the apex
+    // ~60% headroom, keep a sensible floor near typical cruise altitude so the
+    // view is stable with or without live aircraft, and cap for readability.
     const yMin = Math.min(0, ...eff, clearance.homeAsl, clearance.dxAsl)
-    const yTop = Math.max(apexM, maxAcAltM, homeBeamEnd, dxBeamEnd, 1000) * 1.08
+    const yTop = Math.max(
+      apexM * 1.6, // headroom so the funnel visibly opens above the crossover
+      maxAcAltM * 1.12, // keep the highest plane on-scale
+      homeBeamEnd * 1.2,
+      dxBeamEnd * 1.2,
+      12_000, // floor: typical airliner cruise, stable empty-feed view
+    )
     const yMax = Math.min(Y_CEILING_M, yTop) || Y_CEILING_M
 
     const y = (m: number) =>
