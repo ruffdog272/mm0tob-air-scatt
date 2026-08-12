@@ -48,3 +48,42 @@ export function gridToLatLon(grid: string): LatLon | null {
 
   return { lat, lon }
 }
+
+/**
+ * Convert latitude/longitude to a 6-character Maidenhead grid locator.
+ * Used by the "Use My Location" GPS lookup.
+ */
+export function latLonToGrid(lat: number, lon: number): string {
+  // Clamp just shy of the poles / antimeridian so floors stay in range.
+  const la = Math.max(-90, Math.min(89.99999, lat))
+  const lo = Math.max(-180, Math.min(179.99999, lon))
+
+  const A = "A".charCodeAt(0)
+  let x = lo + 180 // 0..360
+  let y = la + 90 // 0..180
+
+  // Field (20° lon x 10° lat)
+  const f1 = Math.floor(x / 20)
+  const f2 = Math.floor(y / 10)
+  x -= f1 * 20
+  y -= f2 * 10
+
+  // Square (2° lon x 1° lat)
+  const sq1 = Math.floor(x / 2)
+  const sq2 = Math.floor(y / 1)
+  x -= sq1 * 2
+  y -= sq2 * 1
+
+  // Subsquare (5' lon x 2.5' lat)
+  const ss1 = Math.floor(x / (5 / 60))
+  const ss2 = Math.floor(y / (2.5 / 60))
+
+  return (
+    String.fromCharCode(A + f1) +
+    String.fromCharCode(A + f2) +
+    String(sq1) +
+    String(sq2) +
+    String.fromCharCode(A + ss1) +
+    String.fromCharCode(A + ss2)
+  )
+}

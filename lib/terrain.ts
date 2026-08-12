@@ -7,8 +7,24 @@
 // is the LOCAL horizon at each station: the minimum antenna take-off (elevation)
 // angle needed to clear nearby hills and get the beam into the sky.
 
-import { EARTH_RADIUS_KM } from "./geo"
 import type { LatLon } from "./maidenhead"
+
+// 4/3 Effective Earth Radius model (standard atmospheric refraction). Using the
+// effective radius makes hills beyond the true horizon "curve away", so radio
+// line-of-sight reaches slightly farther than optical.
+export const EFFECTIVE_EARTH_RADIUS_KM = 8504
+export const EFFECTIVE_EARTH_RADIUS_M = EFFECTIVE_EARTH_RADIUS_KM * 1000
+
+/**
+ * Curvature drop (meters) of a point at ground distance `dKm` from a station,
+ * relative to the station's local horizontal tangent plane:  drop = d² / (2·R).
+ * This is what makes distant terrain and aircraft appear lower than their true
+ * height when computing true radio line-of-sight.
+ */
+export function curvatureDropMeters(dKm: number): number {
+  const d = dKm * 1000
+  return (d * d) / (2 * EFFECTIVE_EARTH_RADIUS_M)
+}
 
 export interface TerrainProfile {
   /** cumulative distance from HOME along the path (km), length 20 */
@@ -28,7 +44,7 @@ export interface ClearanceResult {
   dxGround: number
   /** straight direct-path height (m ASL) at each sample — reference only */
   losLine: number[]
-  /** terrain height plus Earth-curvature bulge (m ASL) at each sample */
+  /** terrain height minus 4/3-earth curvature drop (m) at each sample — display */
   effectiveTerrain: number[]
   /** minimum take-off angle (deg) HOME needs to clear its local terrain */
   homeTakeoffDeg: number
@@ -73,8 +89,6 @@ export function analyzeClearance(
   const homeAsl = homeGround + homeAglM
   const dxAsl = dxGround + dxAglM
 
-  const R = EARTH_RADIUS_KM * 1000 // meters
-
   const losLine: number[] = []
   const effectiveTerrain: number[] = []
 
@@ -82,33 +96,38 @@ export function analyzeClearance(
     const f = totalKm > 0 ? distances[i] / totalKm : 0
     // Straight interpolated line between the antenna tops (reference display).
     losLine.push(homeAsl + (dxAsl - homeAsl) * f)
-    // Earth-curvature bulge (m) at this sample: d1*d2 / (2R).
-    const d1 = distances[i] * 1000
-    const d2 = (totalKm - distances[i]) * 1000
-    const bulge = (d1 * d2) / (2 * R)
-    effectiveTerrain.push(elevations[i] + bulge)
+    // Displayed terrain uses the curvature drop from the NEAREST station, so
+    // each station's local hills stay at true height while the mid-path terrain
+    // sinks below both tangents — the radio horizon "curving away".
+    const dNearKm = Math.min(distances[i], totalKm - distances[i])
+    effectiveTerrain.push(elevations[i] - curvatureDropMeters(dNearKm))
   }
 
-  // HOME take-off angle: largest angle any forward hill subtends above HOME.
+  // HOME take-off angle: largest elevation angle any forward hill subtends above
+  // the HOME antenna, AFTER dropping each hill for earth curvature (drop grows
+  // with distance from HOME, so faraway terrain rarely limits the horizon).
   let homeTakeoffDeg = 0
   let homeObstructionIndex = 0
   for (let i = 1; i < n; i++) {
     const horiz = distances[i] * 1000
     if (horiz <= 0) continue
-    const angle = (Math.atan2(effectiveTerrain[i] - homeAsl, horiz) * 180) / Math.PI
+    const apparent = elevations[i] - curvatureDropMeters(distances[i])
+    const angle = (Math.atan2(apparent - homeAsl, horiz) * 180) / Math.PI
     if (angle > homeTakeoffDeg) {
       homeTakeoffDeg = angle
       homeObstructionIndex = i
     }
   }
 
-  // DX take-off angle: same scan from the DX end (distance measured from DX).
+  // DX take-off angle: same scan from the DX end (curvature drop measured from DX).
   let dxTakeoffDeg = 0
   let dxObstructionIndex = n - 1
   for (let i = n - 2; i >= 0; i--) {
-    const horiz = (totalKm - distances[i]) * 1000
+    const distFromDxKm = totalKm - distances[i]
+    const horiz = distFromDxKm * 1000
     if (horiz <= 0) continue
-    const angle = (Math.atan2(effectiveTerrain[i] - dxAsl, horiz) * 180) / Math.PI
+    const apparent = elevations[i] - curvatureDropMeters(distFromDxKm)
+    const angle = (Math.atan2(apparent - dxAsl, horiz) * 180) / Math.PI
     if (angle > dxTakeoffDeg) {
       dxTakeoffDeg = angle
       dxObstructionIndex = i

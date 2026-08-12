@@ -5,8 +5,9 @@ import dynamic from "next/dynamic"
 import useSWR from "swr"
 import { Plane, Radio, Route } from "lucide-react"
 
-import { gridToLatLon, isValidLocator } from "@/lib/maidenhead"
+import { gridToLatLon, isValidLocator, latLonToGrid } from "@/lib/maidenhead"
 import { bearing, distanceKm, KM_PER_NM } from "@/lib/geo"
+import { type AltUnit, isAltUnit } from "@/lib/units"
 import { analyzeFeed, type RawAircraft } from "@/lib/scatter"
 import { analyzeClearance, type TerrainProfile } from "@/lib/terrain"
 import { StationControls } from "@/components/station-controls"
@@ -56,6 +57,9 @@ export function Dashboard() {
   const [dxGrid, setDxGrid] = useState("FM19LW")
   const [band, setBand] = useState("2m")
   const [callsign, setCallsign] = useState("")
+  const [dxCallsign, setDxCallsign] = useState("")
+  const [altUnit, setAltUnit] = useState<AltUnit>("m")
+  const [locating, setLocating] = useState(false)
   const [myAntM, setMyAntM] = useState(10)
   const [dxAntM, setDxAntM] = useState(10)
   // Manual ground-elevation overrides (m ASL). null = use fetched grid value.
@@ -63,26 +67,61 @@ export function Dashboard() {
   const [dxGroundOverride, setDxGroundOverride] = useState<number | null>(null)
   const [now, setNow] = useState(() => Date.now())
 
-  // Load saved operator settings from localStorage on mount
+  // Load all saved operator settings from localStorage on mount. Runs once
+  // before the persistence effects below re-sync the (now hydrated) values.
   useEffect(() => {
     const saved = localStorage.getItem("operatorCallsign")
     if (saved) setCallsign(saved)
+    const savedDxCall = localStorage.getItem("dxCallsign")
+    if (savedDxCall) setDxCallsign(savedDxCall)
+    const savedMyGrid = localStorage.getItem("myGrid")
+    if (savedMyGrid) setMyGrid(savedMyGrid)
+    const savedDxGrid = localStorage.getItem("dxGrid")
+    if (savedDxGrid) setDxGrid(savedDxGrid)
+    const savedUnit = localStorage.getItem("altUnit")
+    if (isAltUnit(savedUnit)) setAltUnit(savedUnit)
     const my = localStorage.getItem("myAntennaM")
     if (my != null && Number.isFinite(Number.parseFloat(my))) setMyAntM(Number.parseFloat(my))
     const dx = localStorage.getItem("dxAntennaM")
     if (dx != null && Number.isFinite(Number.parseFloat(dx))) setDxAntM(Number.parseFloat(dx))
   }, [])
 
-  // Persist callsign + antenna heights whenever they change
+  // Persist every input field whenever it changes
   useEffect(() => {
     localStorage.setItem("operatorCallsign", callsign)
   }, [callsign])
+  useEffect(() => {
+    localStorage.setItem("dxCallsign", dxCallsign)
+  }, [dxCallsign])
+  useEffect(() => {
+    localStorage.setItem("myGrid", myGrid)
+  }, [myGrid])
+  useEffect(() => {
+    localStorage.setItem("dxGrid", dxGrid)
+  }, [dxGrid])
+  useEffect(() => {
+    localStorage.setItem("altUnit", altUnit)
+  }, [altUnit])
   useEffect(() => {
     localStorage.setItem("myAntennaM", String(myAntM))
   }, [myAntM])
   useEffect(() => {
     localStorage.setItem("dxAntennaM", String(dxAntM))
   }, [dxAntM])
+
+  // GPS auto-lookup: resolve the browser location and fill My Grid.
+  const onUseMyLocation = () => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) return
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition(
+      (p) => {
+        setMyGrid(latLonToGrid(p.coords.latitude, p.coords.longitude))
+        setLocating(false)
+      },
+      () => setLocating(false),
+      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 },
+    )
+  }
 
   // Load any saved ground-elevation override for the current grid. Runs on
   // mount and whenever the grid changes, so a new location starts fresh (or
@@ -224,8 +263,38 @@ export function Dashboard() {
 
       {/* Grid inputs */}
       <div className="rounded-lg border border-border bg-card p-4">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold tracking-tight">Station Setup</h2>
+          <div
+            role="group"
+            aria-label="Altitude units"
+            className="flex items-center gap-1 rounded-lg border border-border bg-secondary/60 p-1"
+          >
+            <span className="px-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+              Altitude
+            </span>
+            {(["m", "ft"] as const).map((u) => {
+              const active = altUnit === u
+              return (
+                <button
+                  key={u}
+                  onClick={() => setAltUnit(u)}
+                  aria-pressed={active}
+                  className={`rounded-md px-2.5 py-1 font-mono text-[11px] font-semibold transition ${
+                    active
+                      ? "bg-primary text-primary-foreground shadow-sm ring-1 ring-primary/60"
+                      : "bg-transparent text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  }`}
+                >
+                  {u === "m" ? "Meters" : "Feet"}
+                </button>
+              )
+            })}
+          </div>
+        </div>
         <StationControls
           callsign={callsign}
+          dxCallsign={dxCallsign}
           myGrid={myGrid}
           dxGrid={dxGrid}
           myCoords={myCoords}
@@ -240,9 +309,13 @@ export function Dashboard() {
           dxFetchedGround={dxFetchedGround}
           myGroundOverridden={myGroundOverride != null}
           dxGroundOverridden={dxGroundOverride != null}
+          unit={altUnit}
+          locating={locating}
           onCallsignChange={setCallsign}
+          onDxCallsignChange={setDxCallsign}
           onMyChange={setMyGrid}
           onDxChange={setDxGrid}
+          onUseMyLocation={onUseMyLocation}
           onMyAntChange={setMyAntM}
           onDxAntChange={setDxAntM}
           onMyGroundChange={setMyGround}
@@ -268,6 +341,7 @@ export function Dashboard() {
               profile={terrain ?? null}
               clearance={clearance}
               aircraft={aircraft}
+              unit={altUnit}
               loading={!terrain && !terrainError}
               error={Boolean(terrainError)}
             />
@@ -276,6 +350,7 @@ export function Dashboard() {
           <AircraftFeed
             aircraft={aircraft}
             band={band}
+            unit={altUnit}
             onBandChange={setBand}
             dataTimestamp={fetchedAt.current}
             now={now}
