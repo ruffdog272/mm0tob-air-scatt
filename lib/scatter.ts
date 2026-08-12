@@ -22,6 +22,12 @@ export const KNOTS_TO_KM_S = 1.852 / 3600
 export const PREDICT_HORIZON_S = 15 * 60
 /** Marginal (yellow) corridor half-width around the path segment (km). */
 export const MARGINAL_CORRIDOR_KM = 10
+/**
+ * Relevance cutoff: aircraft whose projected trajectory never comes within this
+ * distance of the path (over the look-ahead horizon) are discarded as clutter.
+ * ~50 statute miles — a plane that never gets this close cannot scatter usefully.
+ */
+export const MAX_RELEVANT_DIST_KM = 80
 
 export type Probability = "high" | "marginal" | "unlikely"
 
@@ -260,8 +266,11 @@ export function analyzeFeed(
       return alt >= FL_FLOOR_FT
     })
     .map((a) => analyzeAircraft(a, home, dx))
-    // Only keep aircraft actively closing on the bounded path segment.
-    .filter((a) => a.approaching)
+    // Keep only aircraft that (a) are actively closing on the bounded path
+    // segment AND (b) whose projected trajectory actually comes within the
+    // relevance radius. This drops the far-field clutter of planes that will
+    // never get near enough to the path to scatter.
+    .filter((a) => a.approaching && a.minTrajectoryDistKm <= MAX_RELEVANT_DIST_KM)
     .sort((x, y) => {
       const order = { high: 0, marginal: 1, unlikely: 2 }
       if (order[x.probability] !== order[y.probability])
