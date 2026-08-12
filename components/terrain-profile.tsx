@@ -5,6 +5,7 @@ import { Mountain } from "lucide-react"
 
 import type { ClearanceResult, TerrainProfile } from "@/lib/terrain"
 import type { AnalyzedAircraft, Probability } from "@/lib/scatter"
+import { type AltUnit, toDisplayAlt } from "@/lib/units"
 
 const W = 800
 const H = 300
@@ -30,18 +31,20 @@ export function TerrainProfileChart({
   profile,
   clearance,
   aircraft,
+  unit,
   loading,
   error,
 }: {
   profile: TerrainProfile | null
   clearance: ClearanceResult | null
   aircraft: AnalyzedAircraft[]
+  unit: AltUnit
   loading: boolean
   error: boolean
 }) {
   const geom = useMemo(() => {
     if (!profile || !clearance) return null
-    const { distances, elevations, totalKm } = profile
+    const { distances, totalKm } = profile
     const eff = clearance.effectiveTerrain
     const plotW = W - PAD.left - PAD.right
     const plotH = H - PAD.top - PAD.bottom
@@ -88,10 +91,6 @@ export function TerrainProfileChart({
       effTop.map((p) => `L ${p}`).join(" ") +
       ` L ${x(totalKm)},${y(yMin)} Z`
     const terrainLine = `M ${effTop.map((p) => `L ${p}`).join(" ").slice(2)}`
-
-    // Raw ground elevation as a subtle secondary reference line.
-    const groundLine =
-      "M " + elevations.map((e, i) => `${x(distances[i])},${y(e)}`).join(" L ")
 
     // Where each take-off beam, continued UPWARD past the apex, reaches the top
     // of the chart. The HOME beam climbs to the right; the DX beam climbs to the
@@ -140,7 +139,6 @@ export function TerrainProfileChart({
     return {
       areaPath,
       terrainLine,
-      groundLine,
       trianglePath,
       homeBeam,
       dxBeam,
@@ -155,6 +153,8 @@ export function TerrainProfileChart({
       plotYH: plotH,
     }
   }, [profile, clearance, aircraft])
+  // Note: `unit` only affects tick/axis LABELS, not the geometry, so it is not
+  // a memo dependency — the pixel layout is identical in meters or feet.
 
   return (
     <section className="rounded-lg border border-border bg-card p-4">
@@ -251,7 +251,7 @@ export function TerrainProfileChart({
                   className="fill-muted-foreground font-mono"
                   fontSize={9}
                 >
-                  {Math.round(t.v).toLocaleString("en-US")}
+                  {Math.round(toDisplayAlt(t.v, unit)).toLocaleString("en-US")}
                 </text>
               </g>
             ))}
@@ -303,15 +303,6 @@ export function TerrainProfileChart({
                 fill="none"
                 stroke={TERRAIN_LINE}
                 strokeWidth={1.5}
-              />
-              {/* Raw ground elevation reference */}
-              <path
-                d={geom.groundLine}
-                fill="none"
-                stroke={TERRAIN_LINE}
-                strokeWidth={1}
-                strokeDasharray="1 3"
-                opacity={0.6}
               />
 
               {/* Live aircraft plotted at (along-track distance, altitude) */}
@@ -372,7 +363,7 @@ export function TerrainProfileChart({
               fontSize={10}
               transform={`rotate(-90, 14, ${PAD.top + geom.plotYH / 2})`}
             >
-              Altitude (m)
+              Altitude ({unit})
             </text>
           </svg>
 
@@ -404,7 +395,9 @@ export function TerrainProfileChart({
             </span>
             {geom.apex.m >= Y_CEILING_M && (
               <span className="text-muted-foreground/70">
-                (apex clipped at {Y_CEILING_M.toLocaleString("en-US")} m)
+                (apex clipped at{" "}
+                {Math.round(toDisplayAlt(Y_CEILING_M, unit)).toLocaleString("en-US")}{" "}
+                {unit})
               </span>
             )}
           </div>

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { Antenna, ArrowUpRight, Gauge, Plane, Radio, Timer, X } from "lucide-react"
 
 import { BANDS, type AnalyzedAircraft, type Probability } from "@/lib/scatter"
+import { type AltUnit, fmtAltUnit } from "@/lib/units"
 
 const PROB_META: Record<Probability, { label: string; color: string }> = {
   high: { label: "HIGH", color: "var(--prob-high)" },
@@ -57,10 +58,8 @@ function fmtTrajectory(a: AnalyzedAircraft): string {
   return "Misses station-to-station window"
 }
 
-function fmtAlt(altFt: number, altM: number): string {
-  return `${Math.round(altFt).toLocaleString("en-US")} ft / ${Math.round(
-    altM,
-  ).toLocaleString("en-US")} m`
+function fmtAlt(altM: number, unit: AltUnit): string {
+  return fmtAltUnit(altM, unit)
 }
 
 /**
@@ -109,11 +108,13 @@ function HeadingDial({ deg, color }: { deg: number; color: string }) {
 function AircraftRow({
   a,
   band,
+  unit,
   remainingEta,
   onSelect,
 }: {
   a: AnalyzedAircraft
   band: string
+  unit: AltUnit
   remainingEta: number | null
   onSelect: () => void
 }) {
@@ -140,7 +141,7 @@ function AircraftRow({
             </span>
           </div>
           <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[11px] text-muted-foreground">
-            <span>{fmtAlt(a.altFt, a.altM)}</span>
+            <span>{fmtAlt(a.altM, unit)}</span>
             <span>el {a.elevationDeg.toFixed(1)}°</span>
             <span style={{ color: meta.color }}>
               {a.willIntersect ? "crosses" : `${a.distToSegmentKm.toFixed(1)} km off`}
@@ -197,11 +198,13 @@ function DetailRow({
 function AircraftDetail({
   a,
   band,
+  unit,
   remainingEta,
   onClose,
 }: {
   a: AnalyzedAircraft
   band: string
+  unit: AltUnit
   remainingEta: number | null
   onClose: () => void
 }) {
@@ -316,7 +319,7 @@ function AircraftDetail({
             </span>
           </div>
 
-          <DetailRow label="Altitude" value={fmtAlt(a.altFt, a.altM)} />
+          <DetailRow label="Altitude" value={fmtAlt(a.altM, unit)} />
           <DetailRow
             label="Flight Heading"
             value={`${a.headingDeg.toFixed(1)}° (${compassPoint(a.headingDeg)})`}
@@ -375,6 +378,7 @@ function AircraftDetail({
 export function AircraftFeed({
   aircraft,
   band,
+  unit,
   onBandChange,
   dataTimestamp,
   now,
@@ -382,6 +386,7 @@ export function AircraftFeed({
 }: {
   aircraft: AnalyzedAircraft[]
   band: string
+  unit: AltUnit
   onBandChange: (b: string) => void
   dataTimestamp: number | null
   now: number
@@ -447,6 +452,7 @@ export function AircraftFeed({
               key={a.hex}
               a={a}
               band={band}
+              unit={unit}
               remainingEta={remaining}
               onSelect={() => setSelectedHex(a.hex)}
             />
@@ -458,6 +464,7 @@ export function AircraftFeed({
         <AircraftDetail
           a={selected}
           band={band}
+          unit={unit}
           remainingEta={selectedEta}
           onClose={() => setSelectedHex(null)}
         />

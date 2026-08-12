@@ -44,7 +44,7 @@ export interface ClearanceResult {
   dxGround: number
   /** straight direct-path height (m ASL) at each sample — reference only */
   losLine: number[]
-  /** terrain height minus 4/3-earth curvature drop (m) at each sample — display */
+  /** true ground elevation (m ASL) at each sample — honest display profile */
   effectiveTerrain: number[]
   /** minimum take-off angle (deg) HOME needs to clear its local terrain */
   homeTakeoffDeg: number
@@ -96,11 +96,11 @@ export function analyzeClearance(
     const f = totalKm > 0 ? distances[i] / totalKm : 0
     // Straight interpolated line between the antenna tops (reference display).
     losLine.push(homeAsl + (dxAsl - homeAsl) * f)
-    // Displayed terrain uses the curvature drop from the NEAREST station, so
-    // each station's local hills stay at true height while the mid-path terrain
-    // sinks below both tangents — the radio horizon "curving away".
-    const dNearKm = Math.min(distances[i], totalKm - distances[i])
-    effectiveTerrain.push(elevations[i] - curvatureDropMeters(dNearKm))
+    // Displayed terrain is the TRUE ground elevation (honest map profile). Earth
+    // curvature is applied only inside the take-off-angle scans below, where it
+    // belongs — subtracting a curvature "drop" from the displayed profile would
+    // sink the mid-path terrain far below sea level on long paths.
+    effectiveTerrain.push(elevations[i])
   }
 
   // HOME take-off angle: largest elevation angle any forward hill subtends above
