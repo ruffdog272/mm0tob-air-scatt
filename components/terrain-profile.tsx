@@ -76,18 +76,22 @@ export function TerrainProfileChart({
 
     const maxAcAltM = aircraft.reduce((m, a) => Math.max(m, a.altM), 0)
 
-    // Y range: terrain up to the scatter zone. The funnel opens ABOVE the apex,
-    // so the ceiling must sit well above the crossover — otherwise the apex is
-    // pinned to the top and the funnel collapses to a sliver. Give the apex
-    // ~60% headroom, keep a sensible floor near typical cruise altitude so the
-    // view is stable with or without live aircraft, and cap for readability.
+    // Beam altitude (m ASL) at along-path distance `km` measured from HOME.
+    const homeBeamAt = (km: number) => clearance.homeAsl + tanH * km * 1000
+    const dxBeamAt = (km: number) =>
+      clearance.dxAsl + tanD * (totalKm - km) * 1000
+
+    // Y range: fit the scatter geometry plus any live aircraft, with headroom so
+    // the common volume reads clearly. No fixed floor — on long paths the terrain
+    // is genuinely tiny next to cruise altitude, so we let the data drive the
+    // scale (only falling back to a modest ceiling when the feed is empty).
     const yMin = Math.min(0, ...eff, clearance.homeAsl, clearance.dxAsl)
     const yTop = Math.max(
-      apexM * 1.6, // headroom so the funnel visibly opens above the crossover
+      apexM * 1.4,
       maxAcAltM * 1.12, // keep the highest plane on-scale
-      homeBeamEnd * 1.2,
-      dxBeamEnd * 1.2,
-      12_000, // floor: typical airliner cruise, stable empty-feed view
+      homeBeamEnd * 1.15,
+      dxBeamEnd * 1.15,
+      maxAcAltM > 0 ? 0 : 6_000, // default ceiling only when nothing is flying
     )
     const yMax = Math.min(Y_CEILING_M, yTop) || Y_CEILING_M
 
@@ -102,27 +106,34 @@ export function TerrainProfileChart({
       ` L ${x(totalKm)},${y(yMin)} Z`
     const terrainLine = `M ${effTop.map((p) => `L ${p}`).join(" ").slice(2)}`
 
-    // Where each take-off beam, continued UPWARD past the apex, reaches the top
-    // of the chart. The HOME beam climbs to the right; the DX beam climbs to the
-    // left. (Off-plot values are trimmed by the clip path.)
-    const homeTopKm =
-      tanH > 1e-6 ? (yMax - clearance.homeAsl) / (tanH * 1000) : totalKm * 20
-    const dxTopKm =
-      tanD > 1e-6
-        ? totalKm - (yMax - clearance.dxAsl) / (tanD * 1000)
-        : -totalKm * 20
-
-    // Common-volume OPEN FUNNEL: shade the sky ABOVE the beam crossover. Point
-    // at the apex, widening upward to the chart ceiling between the two beams.
+    // --- Common volume (mutual visibility) ---
+    // Sky visible to BOTH stations = the region ABOVE the higher of the two
+    // take-off beams at every point along the path. Building it as the band
+    // between that lower envelope and the chart ceiling is robust for ANY
+    // take-off angles: steep angles produce a narrow high funnel, while the
+    // near-flat beams of a long DX path correctly fill most of the sky (instead
+    // of collapsing the old 3-point triangle into a sliver at the corner).
+    const SAMPLES = 48
+    const envPts: string[] = []
+    for (let i = 0; i <= SAMPLES; i++) {
+      const km = (totalKm * i) / SAMPLES
+      const envM = Math.min(yMax, Math.max(homeBeamAt(km), dxBeamAt(km)))
+      envPts.push(`${x(km)},${y(envM)}`)
+    }
     const trianglePath =
-      `M ${x(apexKm)},${y(apexM)} ` +
-      `L ${x(homeTopKm)},${y(yMax)} ` +
-      `L ${x(dxTopKm)},${y(yMax)} Z`
+      `M ${envPts.join(" L ")} ` +
+      `L ${x(totalKm)},${y(yMax)} L ${x(0)},${y(yMax)} Z`
 
-    // Take-off beam rays drawn full-length: from each antenna up over its local
-    // hill, through the apex, and on to the top of the chart (funnel edges).
-    const homeBeam = `M ${x(0)},${y(clearance.homeAsl)} L ${x(homeTopKm)},${y(yMax)}`
-    const dxBeam = `M ${x(totalKm)},${y(clearance.dxAsl)} L ${x(dxTopKm)},${y(yMax)}`
+    // Take-off beam edges: each drawn from its antenna up to the ceiling, or to
+    // the far edge when a shallow beam never reaches the ceiling within the path.
+    const homeCeilKm =
+      tanH > 1e-6 ? (yMax - clearance.homeAsl) / (tanH * 1000) : Infinity
+    const homeEndKm = Math.min(totalKm, homeCeilKm)
+    const homeBeam = `M ${x(0)},${y(clearance.homeAsl)} L ${x(homeEndKm)},${y(homeBeamAt(homeEndKm))}`
+    const dxCeilKm =
+      tanD > 1e-6 ? totalKm - (yMax - clearance.dxAsl) / (tanD * 1000) : -Infinity
+    const dxEndKm = Math.max(0, dxCeilKm)
+    const dxBeam = `M ${x(totalKm)},${y(clearance.dxAsl)} L ${x(dxEndKm)},${y(dxBeamAt(dxEndKm))}`
 
     // Plotted aircraft: X = along-track distance from HOME, Y = altitude ASL.
     const planes = aircraft.map((a) => ({
