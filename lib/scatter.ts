@@ -20,8 +20,14 @@ export const KNOTS_TO_KM_S = 1.852 / 3600
 
 /** Predictive look-ahead window for trajectory intersection (seconds). */
 export const PREDICT_HORIZON_S = 15 * 60
+/**
+ * Trailing window kept AFTER an aircraft passes its closest approach / path
+ * intercept (seconds). Planes stay visible and tracked for this long once they
+ * have crossed, instead of vanishing the instant they pass.
+ */
+export const PREDICT_TRAILING_S = 5 * 60
 /** Marginal (yellow) corridor half-width around the path segment (km). */
-export const MARGINAL_CORRIDOR_KM = 10
+export const MARGINAL_CORRIDOR_KM = 25
 /**
  * Relevance cutoff: aircraft whose projected trajectory never comes within this
  * distance of the path (over the look-ahead horizon) are discarded as clutter.
@@ -184,30 +190,43 @@ export function analyzeAircraft(
   let etaSeconds: number | null = null
   let willIntersect = false
   let crossingPoint: LatLon | null = null
+  // Track a recent crossing separately so a plane that JUST passed the path
+  // still counts as intersecting (and stays visible) for the trailing window.
+  let recentlyCrossed = false
   if (Math.abs(vPerp) > 1e-9) {
     const tCross = -crossSigned / vPerp
-    if (tCross >= 0 && tCross <= PREDICT_HORIZON_S) {
+    if (tCross >= -PREDICT_TRAILING_S && tCross <= PREDICT_HORIZON_S) {
       const cxE = pEnu.east + vEast * tCross
       const cxN = pEnu.north + vNorth * tCross
       const sCross = cxE * dHatE + cxN * dHatN
       if (sCross >= 0 && sCross <= segLen) {
         willIntersect = true
-        etaSeconds = tCross
+        // Only report a positive ETA for a FUTURE crossing; a past crossing
+        // (within the trailing window) keeps the plane on-screen but has no ETA.
+        etaSeconds = tCross >= 0 ? tCross : null
+        recentlyCrossed = tCross < 0
         crossingPoint = offset(home, cxE, cxN)
       }
     }
   }
 
-  // Closest the projected path comes to the segment over the horizon.
+  // Closest the projected path comes to the segment across the FULL window:
+  // from the trailing edge (5 min in the past) through the 15 min look-ahead.
+  // Spanning the past keeps a plane relevant for 5 min after closest approach.
   let minTrajectoryDistKm = distToSegmentKm
   const STEP_S = 15
-  for (let t = STEP_S; t <= PREDICT_HORIZON_S; t += STEP_S) {
+  for (let t = -PREDICT_TRAILING_S; t <= PREDICT_HORIZON_S; t += STEP_S) {
+    if (t === 0) continue
     const d = segDist(pEnu.east + vEast * t, pEnu.north + vNorth * t)
     if (d < minTrajectoryDistKm) minTrajectoryDistKm = d
   }
 
-  // Approaching = distance to the bounded segment is currently decreasing.
-  const approaching = segDist(pEnu.east + vEast, pEnu.north + vNorth) < distToSegmentKm
+  // Approaching = distance to the bounded segment is currently decreasing, OR
+  // the plane crossed the path within the trailing window (so it lingers on
+  // screen for 5 min after passing rather than dropping out immediately).
+  const approaching =
+    segDist(pEnu.east + vEast, pEnu.north + vNorth) < distToSegmentKm ||
+    recentlyCrossed
 
   // Unit vectors from aircraft toward each station.
   const homeENU = localENU(pos, home)

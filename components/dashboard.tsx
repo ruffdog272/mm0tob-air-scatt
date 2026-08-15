@@ -397,7 +397,7 @@ export function Dashboard() {
               <li className="flex items-start gap-2.5">
                 <span className="mt-0.5 h-3 w-3 shrink-0 rounded-full bg-prob-marginal" />
                 <span className="text-muted-foreground">
-                  <span className="text-foreground">Marginal</span> — passes within 10 km of the segment, or 20–25,000 ft
+                  <span className="text-foreground">Marginal</span> — passes within 25 km of the segment (incl. parallel flights), or 20–25,000 ft
                 </span>
               </li>
               <li className="flex items-start gap-2.5">
@@ -410,8 +410,8 @@ export function Dashboard() {
             <p className="mt-4 border-t border-border/60 pt-3 font-mono text-[10px] leading-relaxed text-muted-foreground/80">
               Search box: 250 NM ({(250 * KM_PER_NM).toFixed(0)} km) around the path
               midpoint. Trajectories are projected 15 min ahead against the bounded
-              HOME↔DX segment. Tap a row for crossing point, dual-station azimuth,
-              and Doppler.
+              HOME↔DX segment, and tracked for 5 min after they pass. Tap a row
+              for crossing point, dual-station azimuth, and Doppler.
             </p>
           </section>
         </aside>
