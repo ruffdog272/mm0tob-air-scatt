@@ -437,8 +437,19 @@ export function Dashboard() {
         </aside>
       </div>
 
-      <footer className="pb-2 text-center font-mono text-[10px] text-muted-foreground/60">
-        ADS-B via adsb.fi · indices via NOAA SWPC · for experimental use
+      <footer className="flex flex-col items-center gap-2 pb-2 sm:flex-row sm:justify-between">
+        <span className="font-mono text-[10px] text-muted-foreground/60">
+          ADS-B via adsb.fi · indices via NOAA SWPC · for experimental use
+        </span>
+        <a
+          href="https://paypal.me/mm0tob"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-secondary/40 px-2.5 py-1 font-mono text-[10px] text-muted-foreground/70 transition-colors hover:border-[#0070ba]/60 hover:bg-[#0070ba]/10 hover:text-[#3b9ae1] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0070ba]/50"
+        >
+          <span aria-hidden="true">🍺</span>
+          Buy me a beer (PayPal)
+        </a>
       </footer>
     </div>
   )
