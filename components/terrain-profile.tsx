@@ -20,7 +20,7 @@ const Y_CEILING_M = 13000
 // stretch ONLY the rendered terrain height by this factor. It affects nothing
 // but the SVG terrain path — Earth-curvature, take-off horizon clearance and
 // common-volume geometry are all computed at true scale elsewhere.
-const TERRAIN_EXAG = 10
+const TERRAIN_EXAG = 5
 
 const PROB_COLOR: Record<Probability, string> = {
   high: "var(--prob-high)",

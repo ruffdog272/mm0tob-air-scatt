@@ -25,7 +25,7 @@ export const PREDICT_HORIZON_S = 15 * 60
  * intercept (seconds). Planes stay visible and tracked for this long once they
  * have crossed, instead of vanishing the instant they pass.
  */
-export const PREDICT_TRAILING_S = 5 * 60
+export const PREDICT_TRAILING_S = 2 * 60
 /** Marginal (yellow) corridor half-width around the path segment (km). */
 export const MARGINAL_CORRIDOR_KM = 25
 /**
@@ -211,8 +211,8 @@ export function analyzeAircraft(
   }
 
   // Closest the projected path comes to the segment across the FULL window:
-  // from the trailing edge (5 min in the past) through the 15 min look-ahead.
-  // Spanning the past keeps a plane relevant for 5 min after closest approach.
+  // from the trailing edge (2 min in the past) through the 15 min look-ahead.
+  // Spanning the past keeps a plane relevant for 2 min after closest approach.
   let minTrajectoryDistKm = distToSegmentKm
   const STEP_S = 15
   for (let t = -PREDICT_TRAILING_S; t <= PREDICT_HORIZON_S; t += STEP_S) {
@@ -223,7 +223,7 @@ export function analyzeAircraft(
 
   // Approaching = distance to the bounded segment is currently decreasing, OR
   // the plane crossed the path within the trailing window (so it lingers on
-  // screen for 5 min after passing rather than dropping out immediately).
+  // screen for 2 min after passing rather than dropping out immediately).
   const approaching =
     segDist(pEnu.east + vEast, pEnu.north + vNorth) < distToSegmentKm ||
     recentlyCrossed

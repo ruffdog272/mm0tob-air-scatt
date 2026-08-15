@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { Antenna, ArrowUpRight, Gauge, Plane, Radio, Timer, X } from "lucide-react"
 
 import {
@@ -388,6 +388,8 @@ export function AircraftFeed({
   dataTimestamp,
   now,
   error,
+  selectedHex,
+  onSelectHex,
 }: {
   aircraft: AnalyzedAircraft[]
   band: string
@@ -396,8 +398,11 @@ export function AircraftFeed({
   dataTimestamp: number | null
   now: number
   error?: boolean
+  /** hex of the selected aircraft (controlled by the parent, shared with map) */
+  selectedHex: string | null
+  /** select (or deselect with null) an aircraft to show/hide its detail card */
+  onSelectHex: (hex: string | null) => void
 }) {
-  const [selectedHex, setSelectedHex] = useState<string | null>(null)
   const elapsed = dataTimestamp ? (now - dataTimestamp) / 1000 : 0
   const selected = aircraft.find((a) => a.hex === selectedHex) ?? null
   const selectedEta =
@@ -459,7 +464,7 @@ export function AircraftFeed({
               band={band}
               unit={unit}
               remainingEta={remaining}
-              onSelect={() => setSelectedHex(a.hex)}
+              onSelect={() => onSelectHex(a.hex)}
             />
           )
         })}
@@ -471,7 +476,7 @@ export function AircraftFeed({
           band={band}
           unit={unit}
           remainingEta={selectedEta}
-          onClose={() => setSelectedHex(null)}
+          onClose={() => onSelectHex(null)}
         />
       )}
     </section>
