@@ -15,6 +15,13 @@ const PAD = { top: 16, right: 16, bottom: 52, left: 52 }
 // send the common-volume apex to infinity. Comfortably above typical cruise.
 const Y_CEILING_M = 13000
 
+// Visual-only vertical exaggeration for the ground terrain. On real paths the
+// hills are tiny next to cruise altitude and collapse into a flat line, so we
+// stretch ONLY the rendered terrain height by this factor. It affects nothing
+// but the SVG terrain path — Earth-curvature, take-off horizon clearance and
+// common-volume geometry are all computed at true scale elsewhere.
+const TERRAIN_EXAG = 5
+
 const PROB_COLOR: Record<Probability, string> = {
   high: "var(--prob-high)",
   marginal: "var(--prob-marginal)",
@@ -98,8 +105,14 @@ export function TerrainProfileChart({
     const y = (m: number) =>
       PAD.top + plotH - ((m - yMin) / (yMax - yMin || 1)) * plotH
 
+    // Visual-only terrain mapping: stretch the hill height above the baseline
+    // by TERRAIN_EXAG so the landscape is legible, clamped to the axis ceiling.
+    // Used ONLY for the terrain fill/outline — never for radio calculations.
+    const yTerrain = (m: number) =>
+      y(Math.min(yMax, yMin + (m - yMin) * TERRAIN_EXAG))
+
     // Effective-terrain area (filled to baseline) + outline.
-    const effTop = eff.map((e, i) => `${x(distances[i])},${y(e)}`)
+    const effTop = eff.map((e, i) => `${x(distances[i])},${yTerrain(e)}`)
     const areaPath =
       `M ${x(0)},${y(yMin)} ` +
       effTop.map((p) => `L ${p}`).join(" ") +
@@ -395,7 +408,7 @@ export function TerrainProfileChart({
                 className="inline-block h-2 w-3 rounded-sm"
                 style={{ background: TERRAIN_FILL, outline: `1px solid ${TERRAIN_LINE}` }}
               />
-              Ground terrain
+              Ground terrain ({TERRAIN_EXAG}× vertical)
             </span>
             <span className="flex items-center gap-1.5">
               <span

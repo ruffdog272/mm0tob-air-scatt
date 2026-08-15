@@ -24,6 +24,15 @@ const PROB_VAR: Record<Probability, string> = {
   unlikely: "var(--prob-unlikely)",
 }
 
+/** Format a live ETA (seconds) as M:SS, matching the flight-panel format. */
+function fmtEta(seconds: number | null): string {
+  if (seconds == null) return "—"
+  if (seconds <= 0) return "NOW"
+  const m = Math.floor(seconds / 60)
+  const s = Math.floor(seconds % 60)
+  return `${m}:${s.toString().padStart(2, "0")}`
+}
+
 function stationIcon(label: string, color: string) {
   return L.divIcon({
     className: "",
@@ -62,13 +71,26 @@ export default function ScatterMap({
   home,
   dx,
   aircraft,
+  dataTimestamp,
+  now,
+  onSelect,
 }: {
   home: LatLon
   dx: LatLon
   aircraft: AnalyzedAircraft[]
+  /** timestamp (ms) of the latest feed reception, for live ETA elapsed math */
+  dataTimestamp?: number | null
+  /** current clock (ms), ticked 1 Hz by the parent, drives the ETA countdown */
+  now?: number
+  /** open the shared detail card for the given aircraft hex */
+  onSelect?: (hex: string) => void
 }) {
   const path = useMemo(() => greatCirclePoints(home, dx, 96), [home, dx])
   const mid = useMemo(() => midpoint(home, dx), [home, dx])
+
+  // Seconds elapsed since the feed snapshot, used to age each aircraft's ETA so
+  // the map tooltip counts down in step with the flight panel.
+  const elapsed = dataTimestamp && now ? (now - dataTimestamp) / 1000 : 0
 
   return (
     <MapContainer
@@ -128,20 +150,31 @@ export default function ScatterMap({
           </CircleMarker>
         ))}
 
-      {aircraft.map((a) => (
-        <Marker
-          key={a.hex}
-          position={[a.pos.lat, a.pos.lon]}
-          icon={planeIcon(a.track, PROB_VAR[a.probability])}
-        >
-          <Tooltip direction="top" offset={[0, -8]} opacity={1}>
-            <span className="font-mono text-xs">
-              {a.callsign} · {Math.round(a.altFt).toLocaleString("en-US")} ft ·{" "}
-              {a.willIntersect ? "crosses" : `${a.distToSegmentKm.toFixed(0)} km off`}
-            </span>
-          </Tooltip>
-        </Marker>
-      ))}
+      {aircraft.map((a) => {
+        const remainingEta =
+          a.etaSeconds != null ? a.etaSeconds - elapsed : null
+        return (
+          <Marker
+            key={a.hex}
+            position={[a.pos.lat, a.pos.lon]}
+            icon={planeIcon(a.track, PROB_VAR[a.probability])}
+            eventHandlers={{ click: () => onSelect?.(a.hex) }}
+          >
+            <Tooltip direction="top" offset={[0, -8]} opacity={1}>
+              <div className="flex flex-col gap-0.5 font-mono text-xs leading-tight">
+                <span className="font-semibold">{a.callsign}</span>
+                <span>{Math.round(a.altFt).toLocaleString("en-US")} ft</span>
+                <span style={{ color: PROB_VAR[a.probability] }}>
+                  {a.willIntersect
+                    ? `ETA ${fmtEta(remainingEta)}`
+                    : `${a.distToSegmentKm.toFixed(0)} km off · no cross`}
+                </span>
+                <span className="opacity-70">click for details</span>
+              </div>
+            </Tooltip>
+          </Marker>
+        )
+      })}
     </MapContainer>
   )
 }
