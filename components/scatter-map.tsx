@@ -102,7 +102,7 @@ export default function ScatterMap({
     >
       <TileLayer
         attribution='&copy; OpenStreetMap &copy; CARTO'
-        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+       url={`https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${process.env.NEXT_PUBLIC_CARTO_API_KEY}`} 
         subdomains="abcd"
       />
       <FitBounds home={home} dx={dx} />
