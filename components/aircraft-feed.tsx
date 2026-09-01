@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect } from "react"
-import { Antenna, ArrowUpRight, Gauge, Plane, Radio, Timer, X } from "lucide-react"
+import { useEffect, useState } from "react"
+import { Antenna, ArrowUpRight, Gauge, Plane, Radio, Timer, Wifi, X } from "lucide-react"
 
 import {
   BANDS,
@@ -214,6 +214,29 @@ function AircraftDetail({
   onClose: () => void
 }) {
   const meta = PROB_META[a.probability]
+  const [autoTrack, setAutoTrack] = useState(false)
+  const [rotatorStatus, setRotatorStatus] = useState<"offline" | "online">("offline")
+
+  useEffect(() => {
+    if (!autoTrack || !Number.isFinite(a.bearingFromHome) || !Number.isFinite(a.elevationDeg)) return
+
+    let active = true
+    void fetch("/api/rotator/track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ az: a.bearingFromHome, el: a.elevationDeg }),
+    })
+      .then((response) => {
+        if (active) setRotatorStatus(response.ok ? "online" : "offline")
+      })
+      .catch(() => {
+        if (active) setRotatorStatus("offline")
+      })
+
+    return () => {
+      active = false
+    }
+  }, [autoTrack, a.bearingFromHome, a.elevationDeg])
 
   // Close on Escape
   useEffect(() => {
@@ -366,6 +389,32 @@ function AircraftDetail({
             value={fmtDoppler(a.doppler[band])}
           />
           <DetailRow label="ETA to path" value={fmtEta(remainingEta)} />
+          <div className="mt-3 flex flex-col gap-3 rounded-md border border-border bg-secondary/30 px-3 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Wifi className="h-3.5 w-3.5 text-primary" />
+                <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Hardware rotator
+                </span>
+              </div>
+              <span className={`flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider ${rotatorStatus === "online" ? "text-emerald-500" : "text-destructive"}`}>
+                <span className={`size-1.5 rounded-full ${rotatorStatus === "online" ? "bg-emerald-500" : "bg-destructive"}`} />
+                {rotatorStatus === "online" ? "Connected" : "Offline"}
+              </span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoTrack}
+              onClick={() => setAutoTrack((enabled) => !enabled)}
+              className="flex items-center justify-between gap-3 text-left focus:outline-none focus:ring-2 focus:ring-ring/50"
+            >
+              <span className="text-xs font-medium text-foreground">Auto-Track Hardware</span>
+              <span className={`relative h-5 w-9 rounded-full transition-colors ${autoTrack ? "bg-primary" : "bg-muted"}`}>
+                <span className={`absolute top-0.5 size-4 rounded-full bg-background shadow-sm transition-transform ${autoTrack ? "translate-x-4" : "translate-x-0.5"}`} />
+              </span>
+            </button>
+          </div>
           <div className="mt-3 flex items-center gap-2 rounded-md bg-secondary/40 px-3 py-2 text-[11px] text-muted-foreground">
             <Radio className="h-3.5 w-3.5 shrink-0 text-primary" />
             <span>
