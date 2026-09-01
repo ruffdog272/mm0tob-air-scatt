@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Antenna, ArrowUpRight, Gauge, Plane, Radio, Timer, Wifi, X } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { Antenna, ArrowUpRight, Gauge, Plane, Radio, Settings, Timer, Wifi, X } from "lucide-react"
 
 import {
   BANDS,
@@ -200,6 +200,130 @@ function DetailRow({
   )
 }
 
+type RotatorProtocol = "pstrotator" | "standard"
+
+type RotatorConfig = {
+  address: string
+  protocol: RotatorProtocol
+  thresholdDeg: number
+}
+
+const ROTATOR_CONFIG_KEY = "rotatorConfig"
+
+const DEFAULT_ROTATOR_CONFIG: RotatorConfig = {
+  address: "http://127.0.0.1:8080",
+  protocol: "pstrotator",
+  thresholdDeg: 0.5,
+}
+
+function loadRotatorConfig(): RotatorConfig {
+  if (typeof window === "undefined") return DEFAULT_ROTATOR_CONFIG
+  try {
+    const raw = localStorage.getItem(ROTATOR_CONFIG_KEY)
+    if (!raw) return DEFAULT_ROTATOR_CONFIG
+    const parsed = JSON.parse(raw) as Partial<RotatorConfig>
+    return {
+      address:
+        typeof parsed.address === "string" && parsed.address.trim()
+          ? parsed.address.trim()
+          : DEFAULT_ROTATOR_CONFIG.address,
+      protocol: parsed.protocol === "standard" ? "standard" : "pstrotator",
+      thresholdDeg:
+        typeof parsed.thresholdDeg === "number" && Number.isFinite(parsed.thresholdDeg) && parsed.thresholdDeg >= 0
+          ? parsed.thresholdDeg
+          : DEFAULT_ROTATOR_CONFIG.thresholdDeg,
+    }
+  } catch {
+    return DEFAULT_ROTATOR_CONFIG
+  }
+}
+
+/** Builds the hardware rotator URL for the given az/el using the selected protocol. */
+function buildRotatorUrl(config: RotatorConfig, az: number, el: number): string {
+  const base = config.address.trim().replace(/\/+$/, "")
+  const azStr = az.toFixed(1)
+  const elStr = el.toFixed(1)
+  return config.protocol === "standard"
+    ? `${base}/set?az=${azStr}&el=${elStr}`
+    : `${base}/azel?az=${azStr}&el=${elStr}`
+}
+
+function RotatorSettingsForm({
+  config,
+  onChange,
+}: {
+  config: RotatorConfig
+  onChange: (next: RotatorConfig) => void
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-md border border-border bg-secondary/20 p-3">
+      <div className="flex flex-col gap-1">
+        <label
+          htmlFor="rotator-address"
+          className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+        >
+          Rotator Address
+        </label>
+        <input
+          id="rotator-address"
+          type="text"
+          value={config.address}
+          onChange={(e) => onChange({ ...config, address: e.target.value })}
+          placeholder="http://127.0.0.1:8080"
+          className="rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50"
+        />
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label
+          htmlFor="rotator-protocol"
+          className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+        >
+          Protocol / Format
+        </label>
+        <select
+          id="rotator-protocol"
+          value={config.protocol}
+          onChange={(e) =>
+            onChange({ ...config, protocol: e.target.value === "standard" ? "standard" : "pstrotator" })
+          }
+          className="rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50"
+        >
+          <option value="pstrotator">PstRotator (azel?az=X&amp;el=Y)</option>
+          <option value="standard">Standard Web (set?az=X&amp;el=Y)</option>
+        </select>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label
+          htmlFor="rotator-threshold"
+          className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+        >
+          Minimum Movement Threshold (°)
+        </label>
+        <input
+          id="rotator-threshold"
+          type="number"
+          min={0}
+          step={0.1}
+          value={config.thresholdDeg}
+          onChange={(e) => {
+            const value = Number.parseFloat(e.target.value)
+            onChange({
+              ...config,
+              thresholdDeg: Number.isFinite(value) && value >= 0 ? value : 0,
+            })
+          }}
+          className="rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50"
+        />
+        <span className="text-[10px] text-muted-foreground">
+          Prevents micro-adjustments that wear out hardware gears.
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function AircraftDetail({
   a,
   band,
@@ -216,18 +340,43 @@ function AircraftDetail({
   const meta = PROB_META[a.probability]
   const [autoTrack, setAutoTrack] = useState(false)
   const [rotatorStatus, setRotatorStatus] = useState<"offline" | "online">("offline")
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [rotatorConfig, setRotatorConfig] = useState<RotatorConfig>(DEFAULT_ROTATOR_CONFIG)
+  const lastSentRef = useRef<{ az: number; el: number } | null>(null)
+
+  // Load persisted rotator config on mount (client-only).
+  useEffect(() => {
+    setRotatorConfig(loadRotatorConfig())
+  }, [])
+
+  const updateRotatorConfig = (next: RotatorConfig) => {
+    setRotatorConfig(next)
+    try {
+      localStorage.setItem(ROTATOR_CONFIG_KEY, JSON.stringify(next))
+    } catch {
+      // Ignore storage failures (e.g. private browsing quota).
+    }
+  }
 
   useEffect(() => {
     if (!autoTrack || !Number.isFinite(a.bearingFromHome) || !Number.isFinite(a.elevationDeg)) return
 
+    const az = a.bearingFromHome
+    const el = a.elevationDeg
+    const last = lastSentRef.current
+    const movedEnough =
+      !last ||
+      Math.abs(az - last.az) >= rotatorConfig.thresholdDeg ||
+      Math.abs(el - last.el) >= rotatorConfig.thresholdDeg
+
+    if (!movedEnough) return
+
     let active = true
-    void fetch("/api/rotator/track", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ az: a.bearingFromHome, el: a.elevationDeg }),
-    })
+    void fetch(buildRotatorUrl(rotatorConfig, az, el), { method: "GET" })
       .then((response) => {
-        if (active) setRotatorStatus(response.ok ? "online" : "offline")
+        if (!active) return
+        setRotatorStatus(response.ok ? "online" : "offline")
+        if (response.ok) lastSentRef.current = { az, el }
       })
       .catch(() => {
         if (active) setRotatorStatus("offline")
@@ -236,7 +385,7 @@ function AircraftDetail({
     return () => {
       active = false
     }
-  }, [autoTrack, a.bearingFromHome, a.elevationDeg])
+  }, [autoTrack, a.bearingFromHome, a.elevationDeg, rotatorConfig])
 
   // Close on Escape
   useEffect(() => {
@@ -402,18 +551,32 @@ function AircraftDetail({
                 {rotatorStatus === "online" ? "Connected" : "Offline"}
               </span>
             </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={autoTrack}
-              onClick={() => setAutoTrack((enabled) => !enabled)}
-              className="flex items-center justify-between gap-3 text-left focus:outline-none focus:ring-2 focus:ring-ring/50"
-            >
-              <span className="text-xs font-medium text-foreground">Auto-Track Hardware</span>
-              <span className={`relative h-5 w-9 rounded-full transition-colors ${autoTrack ? "bg-primary" : "bg-muted"}`}>
-                <span className={`absolute top-0.5 size-4 rounded-full bg-background shadow-sm transition-transform ${autoTrack ? "translate-x-4" : "translate-x-0.5"}`} />
-              </span>
-            </button>
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoTrack}
+                onClick={() => setAutoTrack((enabled) => !enabled)}
+                className="flex flex-1 items-center justify-between gap-3 text-left focus:outline-none focus:ring-2 focus:ring-ring/50"
+              >
+                <span className="text-xs font-medium text-foreground">Auto-Track Hardware</span>
+                <span className={`relative h-5 w-9 rounded-full transition-colors ${autoTrack ? "bg-primary" : "bg-muted"}`}>
+                  <span className={`absolute top-0.5 size-4 rounded-full bg-background shadow-sm transition-transform ${autoTrack ? "translate-x-4" : "translate-x-0.5"}`} />
+                </span>
+              </button>
+              <button
+                type="button"
+                aria-label="Rotator settings"
+                aria-expanded={settingsOpen}
+                onClick={() => setSettingsOpen((open) => !open)}
+                className={`shrink-0 rounded-md p-1.5 transition hover:bg-secondary hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50 ${settingsOpen ? "bg-secondary text-foreground" : "text-muted-foreground"}`}
+              >
+                <Settings className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            {settingsOpen && (
+              <RotatorSettingsForm config={rotatorConfig} onChange={updateRotatorConfig} />
+            )}
           </div>
           <div className="mt-3 flex items-center gap-2 rounded-md bg-secondary/40 px-3 py-2 text-[11px] text-muted-foreground">
             <Radio className="h-3.5 w-3.5 shrink-0 text-primary" />
