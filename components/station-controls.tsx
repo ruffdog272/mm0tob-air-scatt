@@ -228,10 +228,11 @@ function GridField({
         <input
           value={value}
           onChange={(e) => onChange(e.target.value.toUpperCase())}
-          placeholder="FN31pr"
-          maxLength={6}
+          placeholder="FN31pr11"
+          maxLength={8}
           spellCheck={false}
           aria-invalid={!valid}
+          title="4, 6, or 8 character Maidenhead grid locator (e.g. FN31, FN31pr, or FN31pr11)"
           className="w-full rounded-md border border-input bg-secondary/60 px-3 py-2 pr-11 font-mono text-lg tracking-widest text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/40 aria-[invalid=true]:border-destructive"
         />
         {onUseLocation && (

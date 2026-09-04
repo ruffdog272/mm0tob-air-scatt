@@ -100,7 +100,12 @@ export function greatCirclePoints(
 /**
  * Take-off / elevation angle (degrees above the horizon) from a ground
  * station to a target at altitude `altKm`, given great-circle ground
- * distance `groundKm`. Accounts for Earth curvature. Clamped to >= 0.
+ * distance `groundKm`. Accounts for Earth curvature.
+ *
+ * NOT clamped to >= 0: over long paths (e.g. ~250 km trans-mountain shots
+ * in New Zealand) or when the target sits below the local horizon, this
+ * naturally returns a negative angle (e.g. -2.1°). Callers must be able to
+ * display and transmit a signed value.
  */
 export function elevationAngleDeg(groundKm: number, altKm: number): number {
   const R = EARTH_RADIUS_KM
@@ -108,8 +113,7 @@ export function elevationAngleDeg(groundKm: number, altKm: number): number {
   const num = Math.cos(d) - R / (R + altKm)
   const den = Math.sin(d)
   if (den <= 1e-9) return 90
-  const el = toDeg(Math.atan2(num, den))
-  return Math.max(0, el)
+  return toDeg(Math.atan2(num, den))
 }
 
 /**
