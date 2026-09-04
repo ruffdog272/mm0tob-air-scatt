@@ -5,18 +5,18 @@ export interface LatLon {
   lon: number
 }
 
-const LOCATOR_RE = /^[A-R]{2}[0-9]{2}([A-X]{2})?$/i
+const LOCATOR_RE = /^[A-R]{2}[0-9]{2}([A-X]{2}([0-9]{2})?)?$/i
 
 /**
- * Validate a 4 or 6 character Maidenhead grid locator.
+ * Validate a 4, 6, or 8 character Maidenhead grid locator.
  */
 export function isValidLocator(grid: string): boolean {
   return LOCATOR_RE.test(grid.trim())
 }
 
 /**
- * Convert a Maidenhead grid locator (4 or 6 chars) to the lat/lon of the
- * center of the referenced square/subsquare.
+ * Convert a Maidenhead grid locator (4, 6, or 8 chars) to the lat/lon of the
+ * center of the referenced square/subsquare/extended-square.
  */
 export function gridToLatLon(grid: string): LatLon | null {
   const g = grid.trim().toUpperCase()
@@ -33,13 +33,24 @@ export function gridToLatLon(grid: string): LatLon | null {
   lon += (g.charCodeAt(2) - zero) * 2
   lat += (g.charCodeAt(3) - zero) * 1
 
-  if (g.length === 6) {
+  if (g.length >= 6) {
     // Subsquare (5' lon x 2.5' lat)
     lon += (g.charCodeAt(4) - A) * (5 / 60)
     lat += (g.charCodeAt(5) - A) * (2.5 / 60)
-    // Center of the subsquare
-    lon += 2.5 / 60
-    lat += 1.25 / 60
+
+    if (g.length === 8) {
+      // Extended subsquare: divides the 5'x2.5' subsquare into a 10x10 grid
+      // of 30" lon x 15" lat cells using the two trailing digits.
+      lon += (g.charCodeAt(6) - zero) * (5 / 60 / 10)
+      lat += (g.charCodeAt(7) - zero) * (2.5 / 60 / 10)
+      // Center of the extended subsquare
+      lon += 5 / 60 / 20
+      lat += 2.5 / 60 / 20
+    } else {
+      // Center of the subsquare
+      lon += 2.5 / 60
+      lat += 1.25 / 60
+    }
   } else {
     // Center of the square
     lon += 1
